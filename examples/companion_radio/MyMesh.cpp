@@ -2,6 +2,8 @@
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
+#include <cctype>
+#include <cstring>
 
 #define CMD_APP_START                 1
 #define CMD_SEND_TXT_MSG              2
@@ -381,6 +383,75 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
 #endif
 }
 
+void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint32_t timestamp, const char* text, int8_t snr_quarter, const char* display_name, uint8_t txt_type) {
+  if (!text) return;
+
+  const char* payload = text;
+  char composed[320];
+  if (display_name && *display_name) {
+    size_t name_len = strlen(display_name);
+    bool already_prefixed = false;
+    if (strlen(text) > name_len + 2) {
+      if (strncmp(text, display_name, name_len) == 0 && text[name_len] == ':' && text[name_len + 1] == ' ') {
+        already_prefixed = true;
+      }
+    }
+    if (!already_prefixed) {
+      snprintf(composed, sizeof(composed), "%s: %s", display_name, text);
+      payload = composed;
+    }
+  }
+
+  int i = 0;
+  if (app_target_ver >= 3) {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
+    out_frame[i++] = snr_quarter;
+    out_frame[i++] = 0;
+    out_frame[i++] = 0;
+  } else {
+    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
+  }
+
+  out_frame[i++] = channel_idx;
+  out_frame[i++] = path_len;
+  out_frame[i++] = txt_type;
+  memcpy(&out_frame[i], &timestamp, 4);
+  i += 4;
+  int tlen = strlen(payload);
+  if (i + tlen > MAX_FRAME_SIZE) {
+    tlen = MAX_FRAME_SIZE - i;
+  }
+  memcpy(&out_frame[i], payload, tlen);
+  i += tlen;
+  addToOfflineQueue(out_frame, i);
+
+  if (_serial->isConnected()) {
+    uint8_t frame[1] = {PUSH_CODE_MSG_WAITING};
+    _serial->writeFrame(frame, 1);
+  } else {
+#ifdef DISPLAY_CLASS
+    if (_ui) _ui->notify(UIEventType::channelMessage);
+#endif
+  }
+
+#ifdef DISPLAY_CLASS
+  const char *channel_name = display_name ? display_name : "Unknown";
+  if (!display_name) {
+    ChannelDetails channel_details;
+    if (getChannel(channel_idx, channel_details)) {
+      channel_name = channel_details.name;
+    }
+  }
+  if (_ui) _ui->newMsg(path_len, channel_name, text, offline_queue_len);
+#endif
+}
+
+void MyMesh::logLocalChannelMessage(uint8_t channel_idx, const char* text) {
+  if (!text) return;
+  // Use path_len 0 to indicate a local-origin message so the app can treat it as outbound.
+  emitChannelMessageToApp(channel_idx, 0, getRTCClock()->getCurrentTimeUnique(), text, 0, _prefs.node_name, TXT_TYPE_PLAIN);
+}
+
 bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
   // REVISIT: try to determine which Region (from transport_codes[1]) that Sender is indicating for replies/responses
   //    if unknown, fallback to finding Region from transport_codes[0], the 'scope' used by Sender
@@ -432,49 +503,10 @@ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uin
 
 void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t timestamp,
                                   const char *text) {
-  int i = 0;
-  if (app_target_ver >= 3) {
-    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV_V3;
-    out_frame[i++] = (int8_t)(pkt->getSNR() * 4);
-    out_frame[i++] = 0; // reserved1
-    out_frame[i++] = 0; // reserved2
-  } else {
-    out_frame[i++] = RESP_CODE_CHANNEL_MSG_RECV;
-  }
-
   uint8_t channel_idx = findChannelIdx(channel);
-  out_frame[i++] = channel_idx;
-  uint8_t path_len = out_frame[i++] = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
-
-  out_frame[i++] = TXT_TYPE_PLAIN;
-  memcpy(&out_frame[i], &timestamp, 4);
-  i += 4;
-  int tlen = strlen(text); // TODO: UTF-8 ??
-  if (i + tlen > MAX_FRAME_SIZE) {
-    tlen = MAX_FRAME_SIZE - i;
-  }
-  memcpy(&out_frame[i], text, tlen);
-  i += tlen;
-  addToOfflineQueue(out_frame, i);
-
-  if (_serial->isConnected()) {
-    uint8_t frame[1];
-    frame[0] = PUSH_CODE_MSG_WAITING; // send push 'tickle'
-    _serial->writeFrame(frame, 1);
-  } else {
-#ifdef DISPLAY_CLASS
-    if (_ui) _ui->notify(UIEventType::channelMessage);
-#endif
-  }
-#ifdef DISPLAY_CLASS
-  // Get the channel name from the channel index
-  const char *channel_name = "Unknown";
-  ChannelDetails channel_details;
-  if (getChannel(channel_idx, channel_details)) {
-    channel_name = channel_details.name;
-  }
-  if (_ui) _ui->newMsg(path_len, channel_name, text, offline_queue_len);
-#endif
+  uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
+  int8_t snr_quarter = (int8_t)(pkt->getSNR() * 4);
+  emitChannelMessageToApp(channel_idx, path_len, timestamp, text, snr_quarter);
 }
 
 uint8_t MyMesh::onContactRequest(const ContactInfo &contact, uint32_t sender_timestamp, const uint8_t *data,
@@ -668,6 +700,125 @@ void MyMesh::onRawDataRecv(mesh::Packet *packet) {
   }
 }
 
+void MyMesh::loadHeadlessCannedMessages() {
+  size_t count = 0;
+  if (_store->loadCannedMessages(_cannedMessages, canned::kMaxMessages, count) && count > 0) {
+    _cannedMessageCount = count;
+    return;
+  }
+
+  _cannedMessageCount = canned::kDefaultMessageCount;
+  for (size_t i = 0; i < _cannedMessageCount; ++i) {
+    strncpy(_cannedMessages[i], canned::kDefaultMessages[i], canned::kMaxMessageLen);
+    _cannedMessages[i][canned::kMaxMessageLen - 1] = 0;
+  }
+}
+
+void MyMesh::persistHeadlessCannedMessages() {
+  _store->saveCannedMessages(_cannedMessages, _cannedMessageCount);
+}
+
+static inline const char* skipWhitespace(const char* ptr) {
+  while (ptr && *ptr && isspace((unsigned char)*ptr)) {
+    ++ptr;
+  }
+  return ptr;
+}
+
+bool MyMesh::parseCannedMessageList(const char* input, char dest[][canned::kMaxMessageLen], size_t& count) {
+  count = 0;
+  if (!input) return false;
+
+  const char* cursor = input;
+  cursor = skipWhitespace(cursor);
+  while (*cursor && count < canned::kMaxMessages) {
+    if (*cursor == '|') {
+      ++cursor;
+      continue;
+    }
+
+    const char* start = cursor;
+    while (*cursor && *cursor != '|') {
+      ++cursor;
+    }
+    const char* end = cursor;
+    while (end > start && isspace((unsigned char)*(end - 1))) {
+      --end;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+      ++start;
+    }
+    size_t len = end > start ? (size_t)(end - start) : 0;
+    if (len > 0) {
+      size_t copy_len = len < canned::kMaxMessageLen - 1 ? len : canned::kMaxMessageLen - 1;
+      memcpy(dest[count], start, copy_len);
+      dest[count][copy_len] = 0;
+      count++;
+    }
+  }
+  return count > 0;
+}
+
+void MyMesh::summarizeCannedMessages(uint8_t channel_idx) {
+  if (_cannedMessageCount == 0) return;
+
+  char summary[256];
+  size_t pos = snprintf(summary, sizeof(summary), "/msg ");
+  for (size_t i = 0; i < _cannedMessageCount && pos < sizeof(summary) - 1; ++i) {
+    if (i > 0 && pos < sizeof(summary) - 1) {
+      summary[pos++] = '|';
+    }
+    size_t remaining = sizeof(summary) - pos - 1;
+    size_t msg_len = strnlen(_cannedMessages[i], canned::kMaxMessageLen - 1);
+    if (msg_len > remaining) {
+      msg_len = remaining;
+    }
+    memcpy(&summary[pos], _cannedMessages[i], msg_len);
+    pos += msg_len;
+  }
+  summary[pos] = 0;
+  emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), summary, 0, "System", TXT_TYPE_CLI_DATA);
+}
+
+bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, const ChannelDetails& channel) {
+  (void)channel;
+  if (text == NULL) return false;
+  if (channel_idx != 0) return false;
+  if (strncmp(text, "/msg", 4) != 0) return false;
+
+  const char* args = text + 4;
+  if (*args && !isspace((unsigned char)*args) && *args != '=' && *args != '?') {
+    return false; // regular message that happens to start with /msg...
+  }
+
+  args = skipWhitespace(args);
+  if (*args == '=') {
+    ++args;
+  }
+  args = skipWhitespace(args);
+
+  if (*args == '?' || *args == 0) {
+    summarizeCannedMessages(channel_idx);
+    return true;
+  }
+
+  char updated[canned::kMaxMessages][canned::kMaxMessageLen];
+  size_t count = 0;
+  if (!parseCannedMessageList(args, updated, count)) {
+  emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), "/msg error: no entries", 0, "System", TXT_TYPE_CLI_DATA);
+    return true;
+  }
+
+  _cannedMessageCount = count;
+  for (size_t i = 0; i < count; ++i) {
+    strncpy(_cannedMessages[i], updated[i], canned::kMaxMessageLen);
+    _cannedMessages[i][canned::kMaxMessageLen - 1] = 0;
+  }
+  persistHeadlessCannedMessages();
+  summarizeCannedMessages(channel_idx);
+  return true;
+}
+
 void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
                          const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) {
   int i = 0;
@@ -716,6 +867,8 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   dirty_contacts_expiry = 0;
   memset(advert_paths, 0, sizeof(advert_paths));
   memset(send_scope.key, 0, sizeof(send_scope.key));
+  _cannedMessageCount = 0;
+  memset(_cannedMessages, 0, sizeof(_cannedMessages));
 
   // defaults
   memset(&_prefs, 0, sizeof(_prefs));
@@ -787,6 +940,7 @@ void MyMesh::begin(bool has_display) {
   _store->loadContacts(this);
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
   _store->loadChannels(this);
+  loadHeadlessCannedMessages();
 
   radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_set_tx_power(_prefs.tx_power_dbm);
@@ -922,12 +1076,16 @@ void MyMesh::handleCmdFrame(size_t len) {
     i += 4;
     const char *text = (char *)&cmd_frame[i];
 
-    if (txt_type != TXT_TYPE_PLAIN) {
+    ChannelDetails channel;
+    bool success = getChannel(channel_idx, channel);
+    if (!success) {
+      writeErrFrame(ERR_CODE_NOT_FOUND);
+    } else if (handleLocalChannelCommand(channel_idx, text, channel)) {
+      writeOKFrame();
+    } else if (txt_type != TXT_TYPE_PLAIN) {
       writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     } else {
-      ChannelDetails channel;
-      bool success = getChannel(channel_idx, channel);
-      if (success && sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
+      if (sendGroupMessage(msg_timestamp, channel.channel, _prefs.node_name, text, len - i)) {
         writeOKFrame();
       } else {
         writeErrFrame(ERR_CODE_NOT_FOUND); // bad channel_idx

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <cstring>
 #include "DataStore.h"
 
 #if defined(EXTRAFS) || defined(QSPIFLASH)
@@ -360,6 +361,86 @@ void DataStore::saveChannels(DataStoreHost* host) {
     }
     file.close();
   }
+}
+
+bool DataStore::loadCannedMessages(char dest[][canned::kMaxMessageLen], size_t max_count, size_t& out_count) {
+  out_count = 0;
+  File file = openRead(_getContactsChannelsFS(), "/cannedmsgs");
+  if (!file) {
+    return false;
+  }
+
+  uint8_t stored_count = 0;
+  if (file.read(&stored_count, 1) != 1) {
+    file.close();
+    return false;
+  }
+
+  size_t target_count = stored_count;
+  if (target_count > max_count) {
+    target_count = max_count;
+  }
+
+  for (size_t i = 0; i < target_count; ++i) {
+    uint8_t len = 0;
+    if (file.read(&len, 1) != 1) {
+      break;
+    }
+
+    char buffer[canned::kMaxMessageLen];
+    size_t to_read = len;
+    if (to_read >= canned::kMaxMessageLen) {
+      to_read = canned::kMaxMessageLen - 1;
+    }
+
+    if (file.read((uint8_t*)buffer, to_read) != (int)to_read) {
+      break;
+    }
+
+    size_t remaining = len > to_read ? len - to_read : 0;
+    while (remaining > 0) {
+      uint8_t discard[16];
+      size_t chunk = remaining > sizeof(discard) ? sizeof(discard) : remaining;
+      if (file.read(discard, chunk) != (int)chunk) {
+        remaining = 0;
+        break;
+      }
+      remaining -= chunk;
+    }
+
+    buffer[to_read] = 0;
+    strncpy(dest[out_count], buffer, canned::kMaxMessageLen);
+    dest[out_count][canned::kMaxMessageLen - 1] = 0;
+    out_count++;
+  }
+
+  file.close();
+  return out_count > 0;
+}
+
+bool DataStore::saveCannedMessages(const char src[][canned::kMaxMessageLen], size_t count) {
+  if (count > canned::kMaxMessages) {
+    count = canned::kMaxMessages;
+  }
+
+  File file = openWrite(_getContactsChannelsFS(), "/cannedmsgs");
+  if (!file) {
+    return false;
+  }
+
+  uint8_t stored_count = count;
+  bool ok = file.write(&stored_count, 1) == 1;
+  for (size_t i = 0; ok && i < count; ++i) {
+    size_t len = strnlen(src[i], canned::kMaxMessageLen - 1);
+    uint8_t stored_len = len;
+    ok = file.write(&stored_len, 1) == 1;
+    if (ok) {
+      ok = (file.write((const uint8_t*)src[i], len) == (int)len);
+    }
+  }
+
+  file.close();
+  return ok;
 }
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)

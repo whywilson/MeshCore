@@ -4,6 +4,7 @@
 #include <helpers/ContactInfo.h>
 #include <helpers/ChannelDetails.h>
 #include "NodePrefs.h"
+#include "CannedMessages.h"
 
 class DataStoreHost {
 public:
@@ -39,6 +40,8 @@ public:
   void saveContacts(DataStoreHost* host);
   void loadChannels(DataStoreHost* host);
   void saveChannels(DataStoreHost* host);
+  bool loadCannedMessages(char dest[][canned::kMaxMessageLen], size_t max_count, size_t& out_count);
+  bool saveCannedMessages(const char src[][canned::kMaxMessageLen], size_t count);
   void migrateToSecondaryFS();
   uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);
   bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len);

@@ -6,7 +6,8 @@
 // Button timing configuration
 #define BUTTON_DEBOUNCE_TIME_MS    50      // Debounce time in ms
 #define BUTTON_CLICK_TIMEOUT_MS    500     // Max time between clicks for multi-click
-#define BUTTON_LONG_PRESS_TIME_MS  3000    // Time to trigger long press (3 seconds)
+#define BUTTON_LONG_PRESS_TIME_MS  1200    // Time to trigger long press (1.2 seconds)
+#define BUTTON_LONG_HOLD_TIME_MS   5000    // Time to trigger long hold (5 seconds)
 #define BUTTON_READ_INTERVAL_MS    10      // How often to read the button
 
 class Button {
@@ -18,6 +19,7 @@ public:
         TRIPLE_PRESS,
         QUADRUPLE_PRESS,
         LONG_PRESS,
+        LONG_HOLD,
         ANY_PRESS
     };
 
@@ -35,6 +37,7 @@ public:
     void onTriplePress(EventCallback callback) { _onTriplePress = callback; }
     void onQuadruplePress(EventCallback callback) { _onQuadruplePress = callback; }
     void onLongPress(EventCallback callback) { _onLongPress = callback; }
+    void onLongHold(EventCallback callback) { _onLongHold = callback; }
     void onAnyPress(EventCallback callback) { _onAnyPress = callback; }
     
     // State getters
@@ -72,9 +75,13 @@ private:
     EventCallback _onTriplePress = nullptr;
     EventCallback _onQuadruplePress = nullptr;
     EventCallback _onLongPress = nullptr;
+    EventCallback _onLongHold = nullptr;
     EventCallback _onAnyPress = nullptr;
     
     bool readButton();
     void handleStateChange();
     void triggerEvent(EventType event);
+
+    bool _longPressHandled = false;
+    bool _longHoldHandled = false;
 };

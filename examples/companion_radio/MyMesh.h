@@ -25,6 +25,7 @@
 
 #include "DataStore.h"
 #include "NodePrefs.h"
+#include "CannedMessages.h"
 
 #include <RTClib.h>
 #include <helpers/ArduinoHelpers.h>
@@ -94,6 +95,9 @@ public:
   const char *getNodeName();
   NodePrefs *getNodePrefs();
   uint32_t getBLEPin();
+  size_t getHeadlessCannedMessageCount() const { return _cannedMessageCount; }
+  const char* getHeadlessCannedMessage(size_t idx) const { return (idx < _cannedMessageCount) ? _cannedMessages[idx] : ""; }
+  void logLocalChannelMessage(uint8_t channel_idx, const char* text);
 
   void loop();
   void handleCmdFrame(size_t len);
@@ -169,6 +173,12 @@ private:
 
   void checkCLIRescueCmd();
   void checkSerialInterface();
+  void loadHeadlessCannedMessages();
+  void persistHeadlessCannedMessages();
+  bool parseCannedMessageList(const char* input, char dest[][canned::kMaxMessageLen], size_t& count);
+  bool handleLocalChannelCommand(uint8_t channel_idx, const char* text, const ChannelDetails& channel);
+  void emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint32_t timestamp, const char* text, int8_t snr_quarter, const char* display_name = nullptr, uint8_t txt_type = TXT_TYPE_PLAIN);
+  void summarizeCannedMessages(uint8_t channel_idx);
 
   // helpers, short-cuts
   void savePrefs() { _store->savePrefs(_prefs, sensors.node_lat, sensors.node_lon); }
@@ -196,6 +206,8 @@ private:
   uint8_t *sign_data;
   uint32_t sign_data_len;
   unsigned long dirty_contacts_expiry;
+  size_t _cannedMessageCount;
+  char _cannedMessages[canned::kMaxMessages][canned::kMaxMessageLen];
 
   TransportKey send_scope;
 

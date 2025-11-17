@@ -5,6 +5,10 @@
 #include <helpers/SensorManager.h>
 #include <stddef.h>
 
+#ifdef HEADLESS_CANNED_MESSAGES
+#include <helpers/ChannelDetails.h>
+#endif
+
 #ifdef PIN_BUZZER
   #include <helpers/ui/buzzer.h>
 #endif
@@ -48,8 +52,26 @@ class UITask : public AbstractUITask {
   void handleButtonShortPress();
   void handleButtonDoublePress();
   void handleButtonTriplePress();
-  void handleButtonQuadruplePress();
   void handleButtonLongPress();
+  void handleButtonLongHold();
+  void playTone(const char *melody);
+  bool toggleGPSSetting(bool &enabledOut);
+
+#ifdef HEADLESS_CANNED_MESSAGES
+  static constexpr uint32_t kCannedSelectionTimeoutMs = 10000;
+  bool _cannedSelecting = false;
+  int8_t _cannedIndex = -1;
+  uint32_t _cannedLastInteraction = 0;
+
+  void enterCannedMode();
+  void exitCannedMode(bool playTone = true);
+  void advanceCannedMessage();
+  bool sendCurrentCannedMessage();
+  bool sendQuickAdvert();
+  void updateCannedMode();
+  void playCannedTone(const char *melody);
+  void playBinarySelectionTone(uint8_t index);
+#endif
 
  
 public:

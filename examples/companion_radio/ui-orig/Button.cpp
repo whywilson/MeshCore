@@ -61,10 +61,18 @@ void Button::update() {
     }
     
     // Handle long press while button is held
-    if (_state == PRESSED && (now - _pressTime) > BUTTON_LONG_PRESS_TIME_MS) {
-        triggerEvent(LONG_PRESS);
-        _state = IDLE;  // Prevent multiple press events
-        _clickCount = 0;
+    if (_state == PRESSED) {
+        uint32_t held = now - _pressTime;
+        if (!_longPressHandled && held > BUTTON_LONG_PRESS_TIME_MS) {
+            _longPressHandled = true;
+            triggerEvent(LONG_PRESS);
+        }
+        if (!_longHoldHandled && held > BUTTON_LONG_HOLD_TIME_MS) {
+            _longHoldHandled = true;
+            triggerEvent(LONG_HOLD);
+            _state = IDLE;
+            _clickCount = 0;
+        }
     }
 }
 
@@ -83,13 +91,15 @@ void Button::handleStateChange() {
         // Button pressed
         _pressTime = now;
         _state = PRESSED;
+        _longPressHandled = false;
+        _longHoldHandled = false;
         triggerEvent(ANY_PRESS);
     } else {
         // Button released
         if (_state == PRESSED) {
             uint32_t pressDuration = now - _pressTime;
             
-            if (pressDuration < BUTTON_LONG_PRESS_TIME_MS) {
+            if (!_longPressHandled && pressDuration < BUTTON_LONG_PRESS_TIME_MS) {
                 // Short press detected
                 _clickCount++;
                 _releaseTime = now;
@@ -98,7 +108,13 @@ void Button::handleStateChange() {
                 // Long press already handled in update()
                 _state = IDLE;
                 _clickCount = 0;
+                _longPressHandled = false;
+                _longHoldHandled = false;
             }
+        } else if (_state == IDLE && _longHoldHandled) {
+            // ensure flags reset after a long hold once button released
+            _longHoldHandled = false;
+            _longPressHandled = false;
         }
     }
 }
@@ -124,6 +140,9 @@ void Button::triggerEvent(EventType event) {
             break;
         case LONG_PRESS:
             if (_onLongPress) _onLongPress();
+            break;
+        case LONG_HOLD:
+            if (_onLongHold) _onLongHold();
             break;
         default:
             break;

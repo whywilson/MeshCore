@@ -1,7 +1,9 @@
 #include "UITask.h"
 #include <Arduino.h>
 #include <helpers/TxtDataHelpers.h>
+#ifdef HEADLESS_CANNED_MESSAGES
 #include "../MyMesh.h"
+#endif
 
 #define AUTO_OFF_MILLIS     15000   // 15 seconds
 #define BOOT_SCREEN_MILLIS   3000   // 3 seconds
@@ -15,6 +17,30 @@
 #ifndef USER_BTN_PRESSED
 #define USER_BTN_PRESSED LOW
 #endif
+
+#ifdef HEADLESS_CANNED_MESSAGES
+namespace {
+#if defined(PIN_BUZZER)
+constexpr const char *kToneCannedEnter = "CannedEnter:d=32,o=6,b=220:16c6,16e6,16g6";
+constexpr const char *kToneCannedExit = "CannedExit:d=32,o=5,b=180:16g5,16e5,16c5";
+constexpr const char *kToneCannedSend = "CannedSend:d=16,o=6,b=200:8g5,8b5,8d6";
+constexpr const char *kToneCannedError = "CannedErr:d=32,o=5,b=160:8c5,16p,8c5";
+constexpr const char *kToneAdvertSuccess = "AdvertLow:d=8,o=4,b=180:8c4";
+#endif
+} // namespace
+#endif
+
+namespace {
+#if defined(PIN_BUZZER)
+constexpr const char *kToneGpsOn = "GpsOn:d=32,o=6,b=200:16c6,16e6,16g6";
+constexpr const char *kToneGpsOff = "GpsOff:d=32,o=5,b=200:16g5,16e5,16c5";
+constexpr const char *kTonePowerDown = "PowerDown:d=16,o=5,b=140:8g5,8e5,8c5";
+#else
+constexpr const char *kToneGpsOn = nullptr;
+constexpr const char *kToneGpsOff = nullptr;
+constexpr const char *kTonePowerDown = nullptr;
+#endif
+}
 
 // 'meshcore', 128x13px
 static const uint8_t meshcore_logo [] PROGMEM = {
@@ -67,8 +93,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButton->onShortPress([this]() { handleButtonShortPress(); });
   _userButton->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButton->onTriplePress([this]() { handleButtonTriplePress(); });
-  _userButton->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
   _userButton->onLongPress([this]() { handleButtonLongPress(); });
+  _userButton->onLongHold([this]() { handleButtonLongHold(); });
   _userButton->onAnyPress([this]() { handleButtonAnyPress(); });
 #endif
 
@@ -81,8 +107,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButtonAnalog->onShortPress([this]() { handleButtonShortPress(); });
   _userButtonAnalog->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButtonAnalog->onTriplePress([this]() { handleButtonTriplePress(); });
-  _userButtonAnalog->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
   _userButtonAnalog->onLongPress([this]() { handleButtonLongPress(); });
+  _userButtonAnalog->onLongHold([this]() { handleButtonLongHold(); });
   _userButtonAnalog->onAnyPress([this]() { handleButtonAnyPress(); });
 #endif
   ui_started_at = millis();
@@ -309,6 +335,9 @@ void UITask::loop() {
       _userButtonAnalog->update();
     }
   #endif
+#ifdef HEADLESS_CANNED_MESSAGES
+  updateCannedMode();
+#endif
   userLedHandler();
 
 #ifdef PIN_BUZZER
@@ -334,6 +363,125 @@ void UITask::loop() {
   }
 }
 
+#ifdef HEADLESS_CANNED_MESSAGES
+void UITask::enterCannedMode() {
+  size_t cannedCount = the_mesh.getHeadlessCannedMessageCount();
+  if (cannedCount == 0) {
+    return;
+  }
+  _cannedSelecting = true;
+  _cannedIndex = -1;
+  _cannedLastInteraction = millis();
+  MESH_DEBUG_PRINTLN("UITask: headless canned mode entered");
+  playCannedTone(kToneCannedEnter);
+  if (_display != NULL) {
+    snprintf(_alert, sizeof(_alert), "MyMesh ready (%u)",
+             (unsigned)cannedCount);
+    _need_refresh = true;
+  }
+}
+
+void UITask::exitCannedMode(bool playTone) {
+  if (!_cannedSelecting) {
+    return;
+  }
+  _cannedSelecting = false;
+  _cannedIndex = -1;
+  if (playTone) {
+    playCannedTone(kToneCannedExit);
+  }
+  MESH_DEBUG_PRINTLN("UITask: headless canned mode exited");
+}
+
+void UITask::advanceCannedMessage() {
+  size_t cannedCount = the_mesh.getHeadlessCannedMessageCount();
+  if (!_cannedSelecting || cannedCount == 0) {
+    return;
+  }
+  _cannedLastInteraction = millis();
+  _cannedIndex = (_cannedIndex + 1) % cannedCount;
+  playBinarySelectionTone(_cannedIndex);
+  const char* msg = the_mesh.getHeadlessCannedMessage(_cannedIndex);
+  MESH_DEBUG_PRINTLN("UITask: canned msg [%d] %s", _cannedIndex + 1, msg);
+}
+
+bool UITask::sendCurrentCannedMessage() {
+  size_t cannedCount = the_mesh.getHeadlessCannedMessageCount();
+  if (!_cannedSelecting || _cannedIndex < 0 ||
+      _cannedIndex >= (int)cannedCount || cannedCount == 0) {
+    return false;
+  }
+
+  ChannelDetails channel;
+  if (!the_mesh.getChannel(0, channel)) {
+    MESH_DEBUG_PRINTLN("UITask: no primary channel for canned message");
+    playCannedTone(kToneCannedError);
+    return false;
+  }
+
+  const char *text = the_mesh.getHeadlessCannedMessage(_cannedIndex);
+  uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
+  const char *sender = (_node_prefs != NULL) ? _node_prefs->node_name : "";
+
+  bool ok = the_mesh.sendGroupMessage(timestamp, channel.channel, sender, text,
+                                      strlen(text));
+  if (ok) {
+    the_mesh.logLocalChannelMessage(0, text);
+    playCannedTone(kToneCannedSend);
+    MESH_DEBUG_PRINTLN("UITask: canned message sent -> %s", text);
+    if (_display != NULL) {
+      snprintf(_alert, sizeof(_alert), "Sent: %s", text);
+      _need_refresh = true;
+    }
+  } else {
+    playCannedTone(kToneCannedError);
+    MESH_DEBUG_PRINTLN("UITask: failed to send canned message");
+  }
+  return ok;
+}
+
+bool UITask::sendQuickAdvert() {
+  bool ok = the_mesh.advert();
+  if (ok) {
+    playTone(kToneAdvertSuccess);
+    MESH_DEBUG_PRINTLN("UITask: advert sent");
+  } else {
+    playCannedTone(kToneCannedError);
+    MESH_DEBUG_PRINTLN("UITask: advert failed");
+  }
+  return ok;
+}
+
+void UITask::updateCannedMode() {
+  if (_cannedSelecting && (millis() - _cannedLastInteraction) >
+                              kCannedSelectionTimeoutMs) {
+    MESH_DEBUG_PRINTLN("UITask: canned mode timeout");
+    exitCannedMode();
+  }
+}
+
+void UITask::playCannedTone(const char *melody) {
+  playTone(melody);
+}
+
+void UITask::playBinarySelectionTone(uint8_t index) {
+#if defined(PIN_BUZZER)
+  static char melody[128];
+  int pos = snprintf(melody, sizeof(melody), "TapSel:d=32,o=5,b=220:");
+  for (int bit = 2; bit >= 0 && pos < (int)sizeof(melody) - 1; --bit) {
+    const char* note = (index & (1 << bit)) ? "16a6" : "16f5";
+    pos += snprintf(&melody[pos], sizeof(melody) - pos, "%s", note);
+    if (bit > 0 && pos < (int)sizeof(melody) - 1) {
+      pos += snprintf(&melody[pos], sizeof(melody) - pos, ",16p,");
+    }
+  }
+  buzzer.play(melody);
+#else
+  (void)index;
+#endif
+}
+#endif  // HEADLESS_CANNED_MESSAGES
+
 void UITask::handleButtonAnyPress() {
   MESH_DEBUG_PRINTLN("UITask: any press triggered");
   // called on any button press before other events, to wake up the display quickly
@@ -349,6 +497,24 @@ void UITask::handleButtonAnyPress() {
 
 void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
+#ifdef HEADLESS_CANNED_MESSAGES
+  if (_cannedSelecting) {
+    advanceCannedMessage();
+    if (_display != NULL) {
+      const char* msg = the_mesh.getHeadlessCannedMessage(_cannedIndex);
+      snprintf(_alert, sizeof(_alert), "[%d] %s", _cannedIndex + 1, msg);
+      _need_refresh = true;
+    }
+    return;
+  }
+
+  bool advertSent = sendQuickAdvert();
+  if (_display != NULL) {
+    snprintf(_alert, sizeof(_alert), advertSent ? "Advert sent" : "Advert failed");
+    _need_refresh = true;
+  }
+  return;
+#endif
   if (_display != NULL) {
     // Only clear message preview if display was already on before button press
     if (_displayWasOn) {
@@ -367,65 +533,99 @@ void UITask::handleButtonShortPress() {
 }
 
 void UITask::handleButtonDoublePress() {
-  MESH_DEBUG_PRINTLN("UITask: double press triggered, sending advert");
-  // ADVERT
-  #ifdef PIN_BUZZER
-      notify(UIEventType::ack);
-  #endif
-  if (the_mesh.advert()) {
-    MESH_DEBUG_PRINTLN("Advert sent!");
-    sprintf(_alert, "Advert sent!");
+  MESH_DEBUG_PRINTLN("UITask: double press triggered");
+#ifdef HEADLESS_CANNED_MESSAGES
+  if (_cannedSelecting) {
+    exitCannedMode();
   } else {
-    MESH_DEBUG_PRINTLN("Advert failed!");
-    sprintf(_alert, "Advert failed..");
+    enterCannedMode();
   }
-  _need_refresh = true;
+  return;
+#endif
+  // Non-headless: send advert (legacy behavior)
+  #ifdef PIN_BUZZER
+    notify(UIEventType::ack);
+  #endif
+  bool ok = the_mesh.advert();
+  if (_display != NULL) {
+    snprintf(_alert, sizeof(_alert), ok ? "Advert sent" : "Advert failed");
+    _need_refresh = true;
+  }
 }
 
 void UITask::handleButtonTriplePress() {
   MESH_DEBUG_PRINTLN("UITask: triple press triggered");
-  // Toggle buzzer quiet mode
-  #ifdef PIN_BUZZER
-    if (buzzer.isQuiet()) {
-      buzzer.quiet(false);
-      notify(UIEventType::ack);
-      sprintf(_alert, "Buzzer: ON");
-    } else {
-      buzzer.quiet(true);
-      sprintf(_alert, "Buzzer: OFF");
-    }
-    _need_refresh = true;
+#ifdef HEADLESS_CANNED_MESSAGES
+  // Headless: triple press toggles GPS
+  bool gpsEnabled;
+  if (toggleGPSSetting(gpsEnabled)) {
+  #if defined(PIN_BUZZER)
+    playTone(gpsEnabled ? kToneGpsOn : kToneGpsOff);
   #endif
-}
-
-void UITask::handleButtonQuadruplePress() {
-  MESH_DEBUG_PRINTLN("UITask: quad press triggered");
-  if (_sensors != NULL) {
-    // toggle GPS onn/off
-    int num = _sensors->getNumSettings();
-    for (int i = 0; i < num; i++) {
-      if (strcmp(_sensors->getSettingName(i), "gps") == 0) {
-        if (strcmp(_sensors->getSettingValue(i), "1") == 0) {
-          _sensors->setSettingValue("gps", "0");
-          notify(UIEventType::ack);
-          sprintf(_alert, "GPS: Disabled");
-        } else {
-          _sensors->setSettingValue("gps", "1");
-          notify(UIEventType::ack);
-          sprintf(_alert, "GPS: Enabled");
-        }
-        break;
-      }
+    if (_display != NULL) {
+      snprintf(_alert, sizeof(_alert), "GPS: %s", gpsEnabled ? "Enabled" : "Disabled");
+      _need_refresh = true;
     }
   }
-  _need_refresh = true;
+#else
+  // Non-headless: triple press toggles buzzer quiet mode
+#ifdef PIN_BUZZER
+  if (buzzer.isQuiet()) {
+    buzzer.quiet(false);
+    notify(UIEventType::ack);
+    snprintf(_alert, sizeof(_alert), "Buzzer: ON");
+  } else {
+    buzzer.quiet(true);
+    snprintf(_alert, sizeof(_alert), "Buzzer: OFF");
+  }
+  if (_display != NULL) _need_refresh = true;
+#endif
+#endif
 }
 
 void UITask::handleButtonLongPress() {
   MESH_DEBUG_PRINTLN("UITask: long press triggered");
+#ifdef HEADLESS_CANNED_MESSAGES
+  if (_cannedSelecting) {
+    if (sendCurrentCannedMessage()) {
+      exitCannedMode(false);
+    }
+    return;
+  }
+#endif
   if (millis() - ui_started_at < 8000) {   // long press in first 8 seconds since startup -> CLI/rescue
     the_mesh.enterCLIRescue();
-  } else {
-    shutdown();
   }
+}
+
+void UITask::handleButtonLongHold() {
+  MESH_DEBUG_PRINTLN("UITask: long hold triggered");
+  playTone(kTonePowerDown);
+  shutdown();
+}
+
+void UITask::playTone(const char *melody) {
+#if defined(PIN_BUZZER)
+  if (melody != nullptr) {
+    buzzer.play(melody);
+  }
+#else
+  (void)melody;
+#endif
+}
+
+bool UITask::toggleGPSSetting(bool &enabledOut) {
+  if (_sensors == NULL) {
+    return false;
+  }
+  int num = _sensors->getNumSettings();
+  for (int i = 0; i < num; i++) {
+    if (strcmp(_sensors->getSettingName(i), "gps") == 0) {
+      bool currentlyOn = strcmp(_sensors->getSettingValue(i), "1") == 0;
+      _sensors->setSettingValue("gps", currentlyOn ? "0" : "1");
+      enabledOut = !currentlyOn;
+      return true;
+    }
+  }
+  return false;
 }
