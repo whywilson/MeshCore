@@ -8,6 +8,12 @@
 #define ADVERT_LOC_NONE       0
 #define ADVERT_LOC_SHARE      1
 
+enum NotifyMode : uint8_t {
+  NOTIFY_MODE_RTTTL = 0,
+  NOTIFY_MODE_CW    = 1,
+  NOTIFY_MODE_OFF   = 2
+};
+
 struct NodePrefs {  // persisted to file
   float airtime_factor;
   char node_name[32];
@@ -22,6 +28,7 @@ struct NodePrefs {  // persisted to file
   uint8_t telemetry_mode_loc;
   uint8_t telemetry_mode_env;
   float rx_delay_base;
+  uint8_t notify_mode;
   uint32_t ble_pin;
   uint8_t  advert_loc_policy;
 };

@@ -61,6 +61,7 @@ author: https://github.com/LitBomb<!-- omit from toc -->
     - [5.14.3. Python MeshCore](#5143-python-meshcore)
     - [5.14.4. meshcore-cli](#5144-meshcore-cli)
     - [5.14.5. meshcore.js](#5145-meshcorejs)
+    - [5.15. Q: How do I set custom RTTTL ringtones on headless companion radios?](#515-q-how-do-i-set-custom-rtttl-ringtones-on-headless-companion-radios)
 - [6. Troubleshooting](#6-troubleshooting)
   - [6.1. Q: My client says another client or a repeater or a room server was last seen many, many days ago.](#61-q-my-client-says-another-client-or-a-repeater-or-a-room-server-was-last-seen-many-many-days-ago)
   - [6.2. Q: A repeater or a client or a room server I expect to see on my discover list (on T-Deck) or contact list (on a smart device client) are not listed.](#62-q-a-repeater-or-a-client-or-a-room-server-i-expect-to-see-on-my-discover-list-on-t-deck-or-contact-list-on-a-smart-device-client-are-not-listed)
@@ -574,6 +575,18 @@ CLI interface to MeshCore companion radio over BLE, TCP, or serial.  Uses Python
  https://github.com/fdlamotte/meshcore-cli
 
 #### 5.14.5. meshcore.js
+### 5.15. Q: How do I set custom RTTTL ringtones on headless companion radios?
+
+**A:** Devices that run the t1000e_companion_radio_ble firmware with `HEADLESS_CANNED_MESSAGES` enabled now understand the `/ringtone` command. Send the command from the MeshCore app or another radio:
+
+- Send `/ringtone?` on the **public channel** to view the current global RTTTL string.
+- Send `/ringtone siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e` on the **public channel** to set a new global ringtone. The text after `/ringtone` should be a full RTTTL string and is stored exactly as provided.
+- Send `/ringtone reset` on the **public channel** to clear every stored ringtone and return the device to silent mode.
+- Send `/play <rtttl string>` on the **Local** channel to audition a tone directly on the TapTap without transmitting it over LoRa. This is useful when crafting a new tune before sharing it with the mesh.
+- Send `/buz rtttl|cw|off` on the **Local** channel to pick how the TapTap alerts you for new messages: reuse the configured RTTTL ringtone, play a built-in Morse (CW) pattern, or stay silent. Use `/buz?` at any time to see the current mode.
+
+Whenever the headless companion receives a new message it automatically plays the matching RTTTL sound. Channel messages always use the global tone. The feature is only compiled into headless builds so other UI variants are unaffected.
+Private `/ringtone` messages are now treated like ordinary text; only public-channel commands control the ringtone feature.
 A JavaScript library for interacting with a MeshCore device running the companion radio firmware
 https://github.com/liamcottle/meshcore.js
 

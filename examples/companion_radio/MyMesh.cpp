@@ -266,8 +266,8 @@ void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path
       _serial->writeFrame(out_frame, 1 + PUB_KEY_SIZE);
     }
   } else {
-#ifdef DISPLAY_CLASS
-    if (_ui) _ui->notify(UIEventType::newContactMessage);
+#if defined(DISPLAY_CLASS) && !defined(HEADLESS_CANNED_MESSAGES)
+  if (_ui) _ui->notify(UIEventType::newContactMessage);
 #endif
   }
 
@@ -376,10 +376,18 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
   bool should_display = txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN;
   if (should_display && _ui) {
     _ui->newMsg(path_len, from.name, text, offline_queue_len);
+#if !defined(HEADLESS_CANNED_MESSAGES)
     if (!_serial->isConnected()) {
       _ui->notify(UIEventType::contactMessage);
     }
+#endif
   }
+#endif
+  // For headless TapTap-style builds, play CW/RTTTL for
+  // all direct (contact) messages here so both signed and
+  // plain texts go through a single notification path.
+#ifdef HEADLESS_CANNED_MESSAGES
+  maybePlayRingtone(&from, text);
 #endif
 }
 
@@ -429,8 +437,8 @@ void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint
     uint8_t frame[1] = {PUSH_CODE_MSG_WAITING};
     _serial->writeFrame(frame, 1);
   } else {
-#ifdef DISPLAY_CLASS
-    if (_ui) _ui->notify(UIEventType::channelMessage);
+#if defined(DISPLAY_CLASS) && !defined(HEADLESS_CANNED_MESSAGES)
+  if (_ui) _ui->notify(UIEventType::channelMessage);
 #endif
   }
 
@@ -451,6 +459,266 @@ void MyMesh::logLocalChannelMessage(uint8_t channel_idx, const char* text) {
   // Use path_len 0 to indicate a local-origin message so the app can treat it as outbound.
   emitChannelMessageToApp(channel_idx, 0, getRTCClock()->getCurrentTimeUnique(), text, 0, _prefs.node_name, TXT_TYPE_PLAIN);
 }
+
+#ifdef HEADLESS_CANNED_MESSAGES
+static inline const char* skipWhitespace(const char* ptr);
+static inline bool isNotifyDelimiter(char c) {
+  return c == 0 || isspace((unsigned char)c) || c == ',' || c == ';' || c == '|' || c == '\\' || c == '/';
+}
+
+// Standard Morse: mapping to '.' (dot) and '-' (dash)
+static const char* getMorseCode(char c) {
+  c = toupper((unsigned char)c);
+  switch (c) {
+    case 'A': return ".-";
+    case 'B': return "-...";
+    case 'C': return "-.-.";
+    case 'D': return "-..";
+    case 'E': return ".";
+    case 'F': return "..-.";
+    case 'G': return "--.";
+    case 'H': return "....";
+    case 'I': return "..";
+    case 'J': return ".---";
+    case 'K': return "-.-";
+    case 'L': return ".-..";
+    case 'M': return "--";
+    case 'N': return "-.";
+    case 'O': return "---";
+    case 'P': return ".--.";
+    case 'Q': return "--.-";
+    case 'R': return ".-.";
+    case 'S': return "...";
+    case 'T': return "-";
+    case 'U': return "..-";
+    case 'V': return "...-";
+    case 'W': return ".--";
+    case 'X': return "-..-";
+    case 'Y': return "-.--";
+    case 'Z': return "--..";
+    case '0': return "-----";
+    case '1': return ".----";
+    case '2': return "..---";
+    case '3': return "...--";
+    case '4': return "....-";
+    case '5': return ".....";
+    case '6': return "-....";
+    case '7': return "--...";
+    case '8': return "---..";
+    case '9': return "----.";
+    default: return NULL;
+  }
+}
+
+// Build RTTTL string approximating Morse timing
+// Returns true if at least one dot/dash was emitted
+// dot  = 1 unit beep, dash = 3 units beep
+// intra-element gap = 1 unit silence, inter-letter gap ≈ 3 units, word gap ≈ 7 units
+static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len) {
+  if (!message || !rtttl_out || max_len == 0) return false;
+
+  size_t pos = 0;
+  // Faster CW tempo with mid-range octave for ~550Hz tone (C#5 ≈ 554Hz)
+  const char* header = "CW:d=8,o=5,b=360:";
+  size_t hdr_len = strlen(header);
+  if (hdr_len >= max_len) {
+    rtttl_out[0] = 0;
+    return false;
+  }
+  memcpy(rtttl_out, header, hdr_len);
+  pos = hdr_len;
+
+  bool needComma = false;
+  bool emitted = false;
+
+  // Add ~1s of initial silence so CW starts after a short delay
+  // At b=360, "2p" (~0.33s) + ",4p" (~0.66s) ≈ 1s total.
+  if (pos + 5 < max_len) {
+    rtttl_out[pos++] = '2';
+    rtttl_out[pos++] = 'p';
+    rtttl_out[pos++] = ',';
+    rtttl_out[pos++] = '4';
+    rtttl_out[pos++] = 'p';
+    needComma = true;
+  }
+
+  for (size_t i = 0; message[i] && pos + 4 < max_len; ++i) {
+    char ch = message[i];
+    if (ch == ' ') {
+      // word gap ~7 units: use 7p
+      if (needComma && pos < max_len - 1) rtttl_out[pos++] = ',';
+      if (pos + 2 >= max_len) break;
+      rtttl_out[pos++] = '7';
+      rtttl_out[pos++] = 'p';
+      needComma = true;
+      continue;
+    }
+
+    const char* code = getMorseCode(ch);
+    if (!code) {
+      continue; // skip unsupported chars
+    }
+
+    // For each element in the letter
+    static const char kDotNote[] = "c#";   // ≈554Hz at octave 5
+    static const char kDashNote[] = "3c#"; // 3 units of same tone
+    for (size_t j = 0; code[j] && pos + 5 < max_len; ++j) {
+      // beep: dot or dash
+      if (needComma && pos < max_len - 1) rtttl_out[pos++] = ',';
+      if (code[j] == '.') {
+        // dot: 1 unit of ~550Hz tone
+        size_t dot_len = sizeof(kDotNote) - 1;
+        if (pos + dot_len >= max_len) break;
+        memcpy(&rtttl_out[pos], kDotNote, dot_len);
+        pos += dot_len;
+        emitted = true;
+      } else {
+        // dash: 3 units of ~550Hz tone
+        size_t dash_len = sizeof(kDashNote) - 1;
+        if (pos + dash_len >= max_len) break;
+        memcpy(&rtttl_out[pos], kDashNote, dash_len);
+        pos += dash_len;
+        emitted = true;
+      }
+      needComma = true;
+
+      // intra-element gap: 1 unit of silence ("p")
+      if (pos + 2 >= max_len) break;
+      rtttl_out[pos++] = ',';
+      rtttl_out[pos++] = 'p';
+      needComma = true;
+    }
+
+    // extra inter-letter gap of ~2 units (we already had 1 unit from last 'p')
+    if (pos + 3 >= max_len) break;
+    rtttl_out[pos++] = ',';
+    rtttl_out[pos++] = '2';
+    rtttl_out[pos++] = 'p';
+    needComma = true;
+  }
+
+  if (pos < max_len) {
+    rtttl_out[pos] = 0;
+  } else {
+    rtttl_out[max_len - 1] = 0;
+  }
+  return emitted;
+}
+
+void MyMesh::sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text) {
+  if (text == NULL) return;
+  logLocalChannelMessage(channel_idx, text);
+}
+
+const char* MyMesh::describeNotifyMode(uint8_t mode) const {
+  switch (mode) {
+    case NOTIFY_MODE_CW:
+      return "cw";
+    case NOTIFY_MODE_OFF:
+      return "off";
+    case NOTIFY_MODE_RTTTL:
+    default:
+      return "rtttl";
+  }
+}
+
+bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char* text) {
+  if (!text || strncmp(text, "/play", 5) != 0) {
+    return false;
+  }
+
+  const char* args = text + 5;
+  args = skipWhitespace(args);
+  if (*args == '=') {
+    ++args;
+    args = skipWhitespace(args);
+  }
+
+  if (*args == 0) {
+    sendLocalChannelSystemMessage(channel_idx, "/play usage: /play <rtttl>");
+    return true;
+  }
+
+  if (_ui == NULL) {
+    sendLocalChannelSystemMessage(channel_idx, "Audio unavailable");
+    return true;
+  }
+
+  _ui->playRingtone(args);
+  sendLocalChannelSystemMessage(channel_idx, "Playing RTTTL locally");
+  return true;
+}
+
+bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
+  if (!text || strncmp(text, "/buz", 4) != 0) {
+    return false;
+  }
+
+  const char* args = text + 4;
+  args = skipWhitespace(args);
+
+  if (*args == '?') {
+    char response[64];
+    snprintf(response, sizeof(response), "Buzzer mode: %s", describeNotifyMode(_prefs.notify_mode));
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  if (*args == '=') {
+    ++args;
+    args = skipWhitespace(args);
+  }
+
+  if (*args == 0) {
+    sendLocalChannelSystemMessage(channel_idx, "Usage: /buz rtttl|cw|off");
+    return true;
+  }
+
+  // Robust parse: look for first ASCII letter and decide by it.
+  char first_letter = 0;
+  const char* p = args;
+  while (*p) {
+    unsigned char ch = (unsigned char)*p;
+    if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+      first_letter = (char)tolower(ch);
+      break;
+    }
+    ++p;
+  }
+
+  if (!first_letter) {
+    sendLocalChannelSystemMessage(channel_idx, "Usage: /buz rtttl|cw|off");
+    return true;
+  }
+
+  uint8_t new_mode = _prefs.notify_mode;
+  if (first_letter == 'r') {
+    new_mode = NOTIFY_MODE_RTTTL;
+  } else if (first_letter == 'c') {
+    new_mode = NOTIFY_MODE_CW;
+  } else if (first_letter == 'o') {
+    new_mode = NOTIFY_MODE_OFF;
+  } else {
+    sendLocalChannelSystemMessage(channel_idx, "Unknown buzzer mode");
+    return true;
+  }
+
+  if (new_mode == _prefs.notify_mode) {
+    char response[64];
+    snprintf(response, sizeof(response), "Buzzer mode already %s", describeNotifyMode(new_mode));
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  _prefs.notify_mode = new_mode;
+  savePrefs();
+
+  char response[64];
+  snprintf(response, sizeof(response), "Buzzer mode set to %s", describeNotifyMode(new_mode));
+  sendLocalChannelSystemMessage(channel_idx, response);
+  return true;
+}
+#endif
 
 bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
   // REVISIT: try to determine which Region (from transport_codes[1]) that Sender is indicating for replies/responses
@@ -503,10 +771,14 @@ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uin
 
 void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t timestamp,
                                   const char *text) {
-  uint8_t channel_idx = findChannelIdx(channel);
+  int channel_idx_int = findChannelIdx(channel);
+  uint8_t channel_idx = channel_idx_int < 0 ? 0xFF : (uint8_t)channel_idx_int;
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
   int8_t snr_quarter = (int8_t)(pkt->getSNR() * 4);
   emitChannelMessageToApp(channel_idx, path_len, timestamp, text, snr_quarter);
+#ifdef HEADLESS_CANNED_MESSAGES
+  maybePlayRingtone(NULL, text);
+#endif
 }
 
 uint8_t MyMesh::onContactRequest(const ContactInfo &contact, uint32_t sender_timestamp, const uint8_t *data,
@@ -784,6 +1056,10 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   (void)channel;
   if (text == NULL) return false;
   if (channel_idx != 0) return false;
+#ifdef HEADLESS_CANNED_MESSAGES
+  if (handleLocalBuzzerCommand(channel_idx, text)) return true;
+  if (handleLocalPlayCommand(channel_idx, text)) return true;
+#endif
   if (strncmp(text, "/msg", 4) != 0) return false;
 
   const char* args = text + 4;
@@ -805,7 +1081,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   char updated[canned::kMaxMessages][canned::kMaxMessageLen];
   size_t count = 0;
   if (!parseCannedMessageList(args, updated, count)) {
-  emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), "/msg error: no entries", 0, "System", TXT_TYPE_CLI_DATA);
+      emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), "/msg error: no entries", 0, "System", TXT_TYPE_CLI_DATA);
     return true;
   }
 
@@ -818,6 +1094,378 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   summarizeCannedMessages(channel_idx);
   return true;
 }
+
+#ifdef HEADLESS_CANNED_MESSAGES
+namespace {
+static const char* trimLeft(const char* ptr) {
+  while (ptr && *ptr && isspace((unsigned char)*ptr)) {
+    ++ptr;
+  }
+  return ptr;
+}
+
+static bool matchesToken(const char* text, const char* token) {
+  size_t i = 0;
+  while (token[i] && text[i]) {
+    if (tolower((unsigned char)text[i]) != tolower((unsigned char)token[i])) {
+      return false;
+    }
+    ++i;
+  }
+  if (token[i] != 0) return false;
+  return text[i] == 0 || isspace((unsigned char)text[i]);
+}
+
+static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& truncated) {
+  truncated = false;
+  if (dest_size == 0) return 0;
+  const char* start = trimLeft(src);
+  const char* end = start + strlen(start);
+  while (end > start && isspace((unsigned char)*(end - 1))) {
+    --end;
+  }
+  size_t actual_len = (size_t)(end - start);
+  size_t copy_len = actual_len;
+  if (copy_len >= dest_size) {
+    copy_len = dest_size - 1;
+    truncated = true;
+  }
+  if (copy_len > 0) {
+    memcpy(dest, start, copy_len);
+  }
+  dest[copy_len] = 0;
+  return actual_len;
+}
+
+static uint8_t* ringtoneScratch() {
+  static uint8_t blob[ringtone_cfg::kBlobMaxLen];
+  return blob;
+}
+} // namespace
+
+void MyMesh::clearAllRingtones() {
+  _globalRingtone[0] = 0;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    _deviceRingtones[i].in_use = false;
+    memset(_deviceRingtones[i].pub_key, 0, sizeof(_deviceRingtones[i].pub_key));
+    _deviceRingtones[i].tone[0] = 0;
+    _deviceRingtones[i].updated_at = 0;
+  }
+}
+
+void MyMesh::loadHeadlessRingtones() {
+  clearAllRingtones();
+  uint8_t* blob = ringtoneScratch();
+  const size_t scratch_len = ringtone_cfg::kBlobMaxLen;
+  size_t len = 0;
+  if (!_store->loadRingtoneBlob(blob, scratch_len, len) || len < 2) {
+    return;
+  }
+  const uint8_t* ptr = blob;
+  size_t remaining = len;
+  uint8_t version = *ptr++;
+  remaining--;
+  if (version != ringtone_cfg::kBlobVersion) {
+    return;
+  }
+  if (remaining == 0) return;
+  uint8_t globalLen = *ptr++;
+  remaining--;
+  if (globalLen > remaining) return;
+  size_t copy_len = globalLen;
+  if (copy_len >= sizeof(_globalRingtone)) {
+    copy_len = sizeof(_globalRingtone) - 1;
+  }
+  if (copy_len > 0) {
+    memcpy(_globalRingtone, ptr, copy_len);
+  }
+  _globalRingtone[copy_len] = 0;
+  ptr += globalLen;
+  remaining -= globalLen;
+  if (remaining == 0) return;
+  uint8_t entryCount = *ptr++;
+  remaining--;
+  for (uint8_t idx = 0; idx < entryCount; ++idx) {
+    if (remaining < PUB_KEY_SIZE + 5) break;
+    DeviceRingtone temp;
+    temp.in_use = true;
+    memcpy(temp.pub_key, ptr, PUB_KEY_SIZE);
+    ptr += PUB_KEY_SIZE;
+    remaining -= PUB_KEY_SIZE;
+    memcpy(&temp.updated_at, ptr, 4);
+    ptr += 4;
+    remaining -= 4;
+    if (remaining == 0) break;
+    uint8_t toneLen = *ptr++;
+    remaining--;
+    if (toneLen > remaining) break;
+    size_t tone_copy = toneLen;
+    if (tone_copy >= sizeof(temp.tone)) {
+      tone_copy = sizeof(temp.tone) - 1;
+    }
+    if (tone_copy > 0) {
+      memcpy(temp.tone, ptr, tone_copy);
+    }
+    temp.tone[tone_copy] = 0;
+    ptr += toneLen;
+    remaining -= toneLen;
+    if (idx < ringtone_cfg::kMaxDeviceEntries) {
+      _deviceRingtones[idx] = temp;
+    }
+  }
+}
+
+void MyMesh::persistHeadlessRingtones() {
+  uint8_t* blob = ringtoneScratch();
+  const size_t scratch_len = ringtone_cfg::kBlobMaxLen;
+  size_t pos = 0;
+  blob[pos++] = ringtone_cfg::kBlobVersion;
+  size_t globalLen = strnlen(_globalRingtone, sizeof(_globalRingtone) - 1);
+  if (pos + 1 + globalLen > scratch_len) {
+    return;
+  }
+  blob[pos++] = (uint8_t)globalLen;
+  if (globalLen > 0) {
+    memcpy(&blob[pos], _globalRingtone, globalLen);
+    pos += globalLen;
+  }
+  uint8_t entryCount = 0;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (_deviceRingtones[i].in_use && _deviceRingtones[i].tone[0]) {
+      entryCount++;
+    }
+  }
+  if (pos + 1 > scratch_len) {
+    return;
+  }
+  blob[pos++] = entryCount;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (!_deviceRingtones[i].in_use || !_deviceRingtones[i].tone[0]) continue;
+    size_t toneLen = strnlen(_deviceRingtones[i].tone, sizeof(_deviceRingtones[i].tone) - 1);
+    if (pos + PUB_KEY_SIZE + 5 + toneLen > scratch_len) {
+      break;
+    }
+    memcpy(&blob[pos], _deviceRingtones[i].pub_key, PUB_KEY_SIZE);
+    pos += PUB_KEY_SIZE;
+    memcpy(&blob[pos], &_deviceRingtones[i].updated_at, 4);
+    pos += 4;
+    blob[pos++] = (uint8_t)toneLen;
+    if (toneLen > 0) {
+      memcpy(&blob[pos], _deviceRingtones[i].tone, toneLen);
+      pos += toneLen;
+    }
+  }
+  _store->saveRingtoneBlob(blob, pos);
+}
+
+MyMesh::DeviceRingtone* MyMesh::findRingtoneEntry(const uint8_t* pub_key) {
+  if (!pub_key) return NULL;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (_deviceRingtones[i].in_use && memcmp(_deviceRingtones[i].pub_key, pub_key, PUB_KEY_SIZE) == 0) {
+      return &_deviceRingtones[i];
+    }
+  }
+  return NULL;
+}
+
+MyMesh::DeviceRingtone* MyMesh::allocateRingtoneEntry(const uint8_t* pub_key) {
+  if (!pub_key) return NULL;
+  DeviceRingtone* existing = findRingtoneEntry(pub_key);
+  if (existing) return existing;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (!_deviceRingtones[i].in_use) {
+      _deviceRingtones[i].in_use = true;
+      memcpy(_deviceRingtones[i].pub_key, pub_key, PUB_KEY_SIZE);
+      _deviceRingtones[i].tone[0] = 0;
+      _deviceRingtones[i].updated_at = 0;
+      return &_deviceRingtones[i];
+    }
+  }
+  size_t oldest_idx = 0;
+  uint32_t oldest_time = _deviceRingtones[0].updated_at;
+  for (size_t i = 1; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (_deviceRingtones[i].updated_at < oldest_time) {
+      oldest_time = _deviceRingtones[i].updated_at;
+      oldest_idx = i;
+    }
+  }
+  _deviceRingtones[oldest_idx].in_use = true;
+  memcpy(_deviceRingtones[oldest_idx].pub_key, pub_key, PUB_KEY_SIZE);
+  _deviceRingtones[oldest_idx].tone[0] = 0;
+  _deviceRingtones[oldest_idx].updated_at = 0;
+  return &_deviceRingtones[oldest_idx];
+}
+
+const char* MyMesh::getRingtoneFor(const ContactInfo* from) const {
+  if (from) {
+    for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+      if (_deviceRingtones[i].in_use && _deviceRingtones[i].tone[0] &&
+          memcmp(_deviceRingtones[i].pub_key, from->id.pub_key, PUB_KEY_SIZE) == 0) {
+        return _deviceRingtones[i].tone;
+      }
+    }
+  }
+  if (_globalRingtone[0]) {
+    return _globalRingtone;
+  }
+  return NULL;
+}
+
+void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
+  if (_ui == NULL) return;
+  uint8_t mode = _prefs.notify_mode;
+  if (mode > NOTIFY_MODE_OFF) {
+    mode = NOTIFY_MODE_RTTTL;
+  }
+  if (mode == NOTIFY_MODE_OFF) {
+    return;
+  }
+
+  if (mode == NOTIFY_MODE_CW) {
+    // CW 模式只根据消息内容生成摩尔斯；没有消息就不播。
+    if (!text || !text[0]) return;
+
+    // 如果消息是「设备名/ID: 内容」这种格式，去掉前面的前缀，只保留真正的内容。
+    const char* payload = text;
+    if (from && from->name[0]) {
+      size_t name_len = strlen(from->name);
+      if (strncmp(payload, from->name, name_len) == 0) {
+        const char* p = payload + name_len;
+        if (*p == ':' && p[1] == ' ') {
+          payload = p + 2;
+        } else if (*p == ':' || *p == ' ') {
+          payload = p + 1;
+        }
+      }
+    }
+
+    // 再防一手：如果开头直到第一个冒号之间没有空格，也当作 ID 前缀去掉。
+    if (payload) {
+      const char* colon = strchr(payload, ':');
+      if (colon) {
+        bool has_space = false;
+        for (const char* q = payload; q < colon; ++q) {
+          if (*q == ' ') { has_space = true; break; }
+        }
+        if (!has_space) {
+          const char* p = colon;
+          if (p[1] == ' ') {
+            payload = p + 2;
+          } else {
+            payload = p + 1;
+          }
+        }
+      }
+    }
+
+    if (!payload || !payload[0]) return;
+
+    // Larger buffer reduces premature truncation for long CW strings.
+    char cwBuffer[512];
+    bool has_morse = buildMorseRtttl(payload, cwBuffer, sizeof(cwBuffer));
+    if (!has_morse) {
+      // If the text cannot be converted to Morse (e.g. only non-ASCII chars),
+      // still emit a short alert so DMs are not silent in CW mode.
+      const char* fallback = getRingtoneFor(from);
+      if (!fallback || !fallback[0]) {
+        fallback = "d=8,o=5,b=400:4c,4p,4c"; // brief double beep fallback
+      }
+      _ui->playRingtone(fallback);
+      return;
+    }
+    _ui->playRingtone(cwBuffer);
+  } else {
+    const char* tone = getRingtoneFor(from);
+    if (tone && tone[0]) {
+      _ui->playRingtone(tone);
+    }
+  }
+}
+
+void MyMesh::sendRingtoneChannelReply(int channel_idx, const char* text) {
+  if (channel_idx < 0 || text == NULL || !text[0]) return;
+  ChannelDetails channel;
+  if (!getChannel(channel_idx, channel)) return;
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  if (sendGroupMessage(timestamp, channel.channel, _prefs.node_name, text, strlen(text))) {
+    logLocalChannelMessage((uint8_t)channel_idx, text);
+  }
+}
+
+void MyMesh::summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only) {
+  (void)from;
+  char response[256];
+  size_t overrides = 0;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    if (_deviceRingtones[i].in_use && _deviceRingtones[i].tone[0]) {
+      overrides++;
+    }
+  }
+  if (_globalRingtone[0]) {
+    snprintf(response, sizeof(response), "Global ringtone: %s | overrides: %u", _globalRingtone, (unsigned)overrides);
+  } else {
+    snprintf(response, sizeof(response), "Global ringtone not set | overrides: %u", (unsigned)overrides);
+  }
+  if (local_only) {
+    if (channel_idx >= 0) {
+      sendLocalChannelSystemMessage((uint8_t)channel_idx, response);
+    }
+  } else {
+    sendRingtoneChannelReply(channel_idx, response);
+  }
+}
+
+bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_idx, const mesh::GroupChannel* channel, const char* text, bool local_only) {
+  (void)channel;
+  if (from) {
+    return false; // ignore private /ringtone commands
+  }
+  if (!text) return false;
+  if (strncmp(text, "/ringtone", 9) != 0) {
+    return false;
+  }
+
+  auto reply = [&](const char* message) {
+    if (!message) return;
+    if (channel_idx >= 0) {
+      if (local_only) {
+        sendLocalChannelSystemMessage((uint8_t)channel_idx, message);
+      } else {
+        sendRingtoneChannelReply(channel_idx, message);
+      }
+    }
+  };
+
+  const char* args = trimLeft(text + 9);
+  if (*args == 0 || *args == '?') {
+    summarizeRingtoneStatus(from, channel_idx, local_only);
+    return true;
+  }
+  if (matchesToken(args, "reset")) {
+    clearAllRingtones();
+    persistHeadlessRingtones();
+    reply("Ringtone settings cleared");
+    return true;
+  }
+  char tone[ringtone_cfg::kMaxToneLen];
+  bool truncated = false;
+  size_t actual_len = copyTrimmed(args, tone, sizeof(tone), truncated);
+  if (actual_len == 0) {
+    reply("Ringtone error: empty payload");
+    return true;
+  }
+
+  if (channel_idx < 0) {
+    return true; // unable to determine scope
+  }
+
+  strncpy(_globalRingtone, tone, sizeof(_globalRingtone));
+  _globalRingtone[sizeof(_globalRingtone) - 1] = 0;
+  persistHeadlessRingtones();
+  reply(truncated ? "Global ringtone updated (truncated)" : "Global ringtone updated");
+  return true;
+}
+#endif
 
 void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
                          const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) {
@@ -869,6 +1517,15 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   memset(send_scope.key, 0, sizeof(send_scope.key));
   _cannedMessageCount = 0;
   memset(_cannedMessages, 0, sizeof(_cannedMessages));
+#ifdef HEADLESS_CANNED_MESSAGES
+  _globalRingtone[0] = 0;
+  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
+    _deviceRingtones[i].in_use = false;
+    _deviceRingtones[i].tone[0] = 0;
+    memset(_deviceRingtones[i].pub_key, 0, sizeof(_deviceRingtones[i].pub_key));
+    _deviceRingtones[i].updated_at = 0;
+  }
+#endif
 
   // defaults
   memset(&_prefs, 0, sizeof(_prefs));
@@ -916,6 +1573,9 @@ void MyMesh::begin(bool has_display) {
   _prefs.sf = constrain(_prefs.sf, 5, 12);
   _prefs.cr = constrain(_prefs.cr, 5, 8);
   _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, 1, MAX_LORA_TX_POWER);
+  if (_prefs.notify_mode > NOTIFY_MODE_OFF) {
+    _prefs.notify_mode = NOTIFY_MODE_RTTTL;
+  }
 
 #ifdef BLE_PIN_CODE // 123456 by default
   if (_prefs.ble_pin == 0) {
@@ -941,6 +1601,9 @@ void MyMesh::begin(bool has_display) {
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
   _store->loadChannels(this);
   loadHeadlessCannedMessages();
+#ifdef HEADLESS_CANNED_MESSAGES
+  loadHeadlessRingtones();
+#endif
 
   radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_set_tx_power(_prefs.tx_power_dbm);
@@ -1080,6 +1743,10 @@ void MyMesh::handleCmdFrame(size_t len) {
     bool success = getChannel(channel_idx, channel);
     if (!success) {
       writeErrFrame(ERR_CODE_NOT_FOUND);
+#ifdef HEADLESS_CANNED_MESSAGES
+    } else if (txt_type == TXT_TYPE_PLAIN && handleIncomingRingtoneCommand(NULL, (int)channel_idx, &channel.channel, text, true)) {
+      writeOKFrame();
+#endif
     } else if (handleLocalChannelCommand(channel_idx, text, channel)) {
       writeOKFrame();
     } else if (txt_type != TXT_TYPE_PLAIN) {

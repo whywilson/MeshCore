@@ -81,7 +81,11 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   sprintf(_version_info, "%s (%s)", version, FIRMWARE_BUILD_DATE);
 
 #ifdef PIN_BUZZER
-  buzzer.begin();
+  bool suppress_startup = (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF);
+  buzzer.begin(suppress_startup);
+  if (suppress_startup) {
+    buzzer.quiet(true);
+  }
 #endif
 
   // Initialize digital button if available
@@ -116,6 +120,10 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 
 void UITask::notify(UIEventType t) {
 #if defined(PIN_BUZZER)
+  // Honor /buz off: suppress all UI beeps when notify_mode is OFF.
+  if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
+    return;
+  }
 switch(t){
   case UIEventType::contactMessage:
     // gemini's pick
@@ -612,6 +620,14 @@ void UITask::playTone(const char *melody) {
 #else
   (void)melody;
 #endif
+}
+
+void UITask::playRingtone(const char* melody) {
+  // Also respect /buz off for ringtones/RTTTL/CW.
+  if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
+    return;
+  }
+  playTone(melody);
 }
 
 bool UITask::toggleGPSSetting(bool &enabledOut) {

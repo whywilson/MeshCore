@@ -1,7 +1,7 @@
 #ifdef PIN_BUZZER
 #include "buzzer.h"
 
-void genericBuzzer::begin() {
+void genericBuzzer::begin(bool suppress_startup) {
 //    Serial.print("DBG: Setting up buzzer on pin ");
 //    Serial.println(PIN_BUZZER);
     #ifdef PIN_BUZZER_EN
@@ -9,10 +9,17 @@ void genericBuzzer::begin() {
       digitalWrite(PIN_BUZZER_EN, HIGH);
     #endif
 
-    quiet(false);
+        // If startup should be silent, leave quiet mode engaged until explicitly changed.
+        if (suppress_startup) {
+            _is_quiet = true;
+        } else {
+            quiet(false);
+        }
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_BUZZER, LOW); // need to pull low by default to avoid extreme power draw
-    startup();
+        if (!suppress_startup) {
+            startup();
+        }
 }
 
 void genericBuzzer::play(const char *melody) {

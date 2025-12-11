@@ -85,6 +85,15 @@ struct AdvertPath {
   uint8_t path[MAX_PATH_SIZE];
 };
 
+#ifdef HEADLESS_CANNED_MESSAGES
+namespace ringtone_cfg {
+  constexpr size_t kMaxToneLen = 192;
+  constexpr size_t kMaxDeviceEntries = 12;
+  constexpr uint8_t kBlobVersion = 1;
+  constexpr size_t kBlobMaxLen = 4096;
+}
+#endif
+
 class MyMesh : public BaseChatMesh, public DataStoreHost {
 public:
   MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store, AbstractUITask* ui=NULL);
@@ -179,6 +188,28 @@ private:
   bool handleLocalChannelCommand(uint8_t channel_idx, const char* text, const ChannelDetails& channel);
   void emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint32_t timestamp, const char* text, int8_t snr_quarter, const char* display_name = nullptr, uint8_t txt_type = TXT_TYPE_PLAIN);
   void summarizeCannedMessages(uint8_t channel_idx);
+#ifdef HEADLESS_CANNED_MESSAGES
+  struct DeviceRingtone {
+    bool in_use;
+    uint8_t pub_key[PUB_KEY_SIZE];
+    char tone[ringtone_cfg::kMaxToneLen];
+    uint32_t updated_at;
+  };
+  void loadHeadlessRingtones();
+  void persistHeadlessRingtones();
+  bool handleIncomingRingtoneCommand(const ContactInfo* from, int channel_idx, const mesh::GroupChannel* channel, const char* text, bool local_only = false);
+  void maybePlayRingtone(const ContactInfo* from, const char* text);
+  const char* getRingtoneFor(const ContactInfo* from) const;
+  DeviceRingtone* findRingtoneEntry(const uint8_t* pub_key);
+  DeviceRingtone* allocateRingtoneEntry(const uint8_t* pub_key);
+  void clearAllRingtones();
+  void sendRingtoneChannelReply(int channel_idx, const char* text);
+  void summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only);
+  void sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text);
+  bool handleLocalBuzzerCommand(uint8_t channel_idx, const char* text);
+  bool handleLocalPlayCommand(uint8_t channel_idx, const char* text);
+  const char* describeNotifyMode(uint8_t mode) const;
+#endif
 
   // helpers, short-cuts
   void savePrefs() { _store->savePrefs(_prefs, sensors.node_lat, sensors.node_lon); }
@@ -210,6 +241,11 @@ private:
   char _cannedMessages[canned::kMaxMessages][canned::kMaxMessageLen];
 
   TransportKey send_scope;
+
+#ifdef HEADLESS_CANNED_MESSAGES
+  char _globalRingtone[ringtone_cfg::kMaxToneLen];
+  DeviceRingtone _deviceRingtones[ringtone_cfg::kMaxDeviceEntries];
+#endif
 
   uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
   uint8_t out_frame[MAX_FRAME_SIZE + 1];

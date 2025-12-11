@@ -531,7 +531,11 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   }
 
 #ifdef PIN_BUZZER
-  buzzer.begin();
+  bool suppress_startup = (node_prefs && node_prefs->notify_mode == NOTIFY_MODE_OFF);
+  buzzer.begin(suppress_startup);
+  if (suppress_startup) {
+    buzzer.quiet(true);
+  }
 #endif
 
 #ifdef PIN_VIBRATION
@@ -554,6 +558,10 @@ void UITask::showAlert(const char* text, int duration_millis) {
 
 void UITask::notify(UIEventType t) {
 #if defined(PIN_BUZZER)
+// Respect /buz off: when notify_mode is OFF, suppress UI beeps.
+if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
+  return;
+}
 switch(t){
   case UIEventType::contactMessage:
     // gemini's pick
@@ -578,6 +586,20 @@ switch(t){
   if (t != UIEventType::none) {
     vibration.trigger();
   }
+#endif
+}
+
+void UITask::playRingtone(const char* melody) {
+#if defined(PIN_BUZZER)
+  // Also honor /buz off for RTTTL/CW playback.
+  if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
+    return;
+  }
+  if (melody != nullptr) {
+    buzzer.play(melody);
+  }
+#else
+  (void)melody;
 #endif
 }
 

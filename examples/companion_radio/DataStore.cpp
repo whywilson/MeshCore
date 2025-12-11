@@ -220,7 +220,13 @@ void DataStore::loadPrefsInt(const char *filename, NodePrefs& _prefs, double& no
     file.read((uint8_t *)&_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));             // 72
     file.read((uint8_t *)&_prefs.advert_loc_policy, sizeof(_prefs.advert_loc_policy));     // 76
     file.read((uint8_t *)&_prefs.multi_acks, sizeof(_prefs.multi_acks));                   // 77
-    file.read(pad, 2);                                                                     // 78
+    uint8_t notify_and_pad[2] = {0};
+    int np_read = file.read(notify_and_pad, 2);                                            // 78
+    if (np_read > 0) {
+      _prefs.notify_mode = notify_and_pad[0];
+    } else {
+      _prefs.notify_mode = NOTIFY_MODE_RTTTL;
+    }
     file.read((uint8_t *)&_prefs.ble_pin, sizeof(_prefs.ble_pin));                         // 80
 
     file.close();
@@ -251,7 +257,8 @@ void DataStore::savePrefs(const NodePrefs& _prefs, double node_lat, double node_
     file.write((uint8_t *)&_prefs.rx_delay_base, sizeof(_prefs.rx_delay_base));             // 72
     file.write((uint8_t *)&_prefs.advert_loc_policy, sizeof(_prefs.advert_loc_policy));     // 76
     file.write((uint8_t *)&_prefs.multi_acks, sizeof(_prefs.multi_acks));                   // 77
-    file.write(pad, 2);                                                                     // 78
+    uint8_t notify_and_pad[2] = {_prefs.notify_mode, 0};
+    file.write(notify_and_pad, 2);                                                          // 78
     file.write((uint8_t *)&_prefs.ble_pin, sizeof(_prefs.ble_pin));                         // 80
 
     file.close();
@@ -441,6 +448,40 @@ bool DataStore::saveCannedMessages(const char src[][canned::kMaxMessageLen], siz
 
   file.close();
   return ok;
+}
+
+bool DataStore::loadRingtoneBlob(uint8_t* dest, size_t max_len, size_t& out_len) {
+  out_len = 0;
+  if (dest == nullptr || max_len == 0) {
+    return false;
+  }
+  File file = openRead(_getContactsChannelsFS(), "/ringtone.cfg");
+  if (!file) {
+    return false;
+  }
+
+  while (out_len < max_len) {
+    int n = file.read(dest + out_len, max_len - out_len);
+    if (n <= 0) {
+      break;
+    }
+    out_len += n;
+  }
+  file.close();
+  return out_len > 0;
+}
+
+bool DataStore::saveRingtoneBlob(const uint8_t* src, size_t len) {
+  if (src == nullptr || len == 0) {
+    return false;
+  }
+  File file = openWrite(_getContactsChannelsFS(), "/ringtone.cfg");
+  if (!file) {
+    return false;
+  }
+  size_t written = file.write(src, len);
+  file.close();
+  return written == len;
 }
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)

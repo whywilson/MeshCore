@@ -19,7 +19,7 @@
 class genericBuzzer
 {
     public:
-        void begin();  // set up buzzer port
+        void begin(bool suppress_startup = false);  // set up buzzer port; optionally skip startup tone
         void play(const char *melody); // Generic play function
         void loop();  // loop driven-nonblocking
         void startup();  // play startup sound
