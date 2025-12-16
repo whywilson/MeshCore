@@ -519,7 +519,8 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
 
   size_t pos = 0;
   // Faster CW tempo with mid-range octave for ~550Hz tone (C#5 ≈ 554Hz)
-  const char* header = "CW:d=8,o=5,b=360:";
+  // b=420 keeps dashes (~3 units) audible while shortening overall message time.
+  const char* header = "CW:d=8,o=5,b=420:";
   size_t hdr_len = strlen(header);
   if (hdr_len >= max_len) {
     rtttl_out[0] = 0;
@@ -626,13 +627,8 @@ bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char* text) {
   if (!text || strncmp(text, "/play", 5) != 0) {
     return false;
   }
-
   const char* args = text + 5;
   args = skipWhitespace(args);
-  if (*args == '=') {
-    ++args;
-    args = skipWhitespace(args);
-  }
 
   if (*args == 0) {
     sendLocalChannelSystemMessage(channel_idx, "/play usage: /play <rtttl>");
@@ -657,20 +653,12 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
   const char* args = text + 4;
   args = skipWhitespace(args);
 
-  if (*args == '?') {
-    char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s", describeNotifyMode(_prefs.notify_mode));
-    sendLocalChannelSystemMessage(channel_idx, response);
-    return true;
-  }
-
-  if (*args == '=') {
-    ++args;
-    args = skipWhitespace(args);
-  }
+  // Space-delimited: no '=' or '?' handling. Empty -> query.
 
   if (*args == 0) {
-    sendLocalChannelSystemMessage(channel_idx, "Usage: /buz rtttl|cw|off");
+    char response[64];
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
 
@@ -687,7 +675,9 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
   }
 
   if (!first_letter) {
-    sendLocalChannelSystemMessage(channel_idx, "Usage: /buz rtttl|cw|off");
+    char response[64];
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
 
@@ -699,7 +689,9 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
   } else if (first_letter == 'o') {
     new_mode = NOTIFY_MODE_OFF;
   } else {
-    sendLocalChannelSystemMessage(channel_idx, "Unknown buzzer mode");
+    char response[64];
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
 
@@ -1052,28 +1044,60 @@ void MyMesh::summarizeCannedMessages(uint8_t channel_idx) {
   emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), summary, 0, "System", TXT_TYPE_CLI_DATA);
 }
 
+// Local command registry for easier management/dumping.
+enum class LocalCommand : uint8_t {
+  Msg = 0,
+  Buz,
+  Ringtone,
+  Play,
+  Help,
+  Count
+};
+
+static constexpr const char* kLocalCommandNames[] = {
+  "/msg",
+  "/buz",
+  "/ringtone",
+  "/play",
+  "/help",
+};
+
+static_assert(static_cast<size_t>(LocalCommand::Count) == (sizeof(kLocalCommandNames) / sizeof(kLocalCommandNames[0])),
+              "LocalCommand enum and name table must stay in sync");
+
 bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, const ChannelDetails& channel) {
   (void)channel;
   if (text == NULL) return false;
-  if (channel_idx != 0) return false;
+  // Trim leading spaces so commands like "  /msg" still match, and allow trailing
+  // spaces to be ignored by downstream parsers.
+  const char* cmd = skipWhitespace(text);
 #ifdef HEADLESS_CANNED_MESSAGES
-  if (handleLocalBuzzerCommand(channel_idx, text)) return true;
-  if (handleLocalPlayCommand(channel_idx, text)) return true;
+  if (handleLocalBuzzerCommand(channel_idx, cmd)) return true;
+  if (handleLocalPlayCommand(channel_idx, cmd)) return true;
+  // /help: list supported commands
+  if (strncmp(cmd, "/help", 5) == 0) {
+    const char* help =
+      "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]";
+    sendLocalChannelSystemMessage(channel_idx, help);
+    return true;
+  }
 #endif
-  if (strncmp(text, "/msg", 4) != 0) return false;
 
-  const char* args = text + 4;
-  if (*args && !isspace((unsigned char)*args) && *args != '=' && *args != '?') {
-    return false; // regular message that happens to start with /msg...
+  // Only handle /msg here; other prefixes are handled above.
+  if (strncmp(cmd, kLocalCommandNames[static_cast<size_t>(LocalCommand::Msg)], 4) != 0) return false;
+
+  const char* args = cmd + 4;
+  // Treat any text starting with "/msg" as a command. If the next char isn't space
+  // or terminator, return usage instead of sending as a normal message.
+  if (*args && !isspace((unsigned char)*args)) {
+    emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(),
+                            "Usage: /msg <item1|item2|...>", 0, "System", TXT_TYPE_CLI_DATA);
+    return true;
   }
 
   args = skipWhitespace(args);
-  if (*args == '=') {
-    ++args;
-  }
-  args = skipWhitespace(args);
 
-  if (*args == '?' || *args == 0) {
+  if (*args == 0) {
     summarizeCannedMessages(channel_idx);
     return true;
   }
@@ -1097,8 +1121,13 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
 
 #ifdef HEADLESS_CANNED_MESSAGES
 namespace {
+static inline bool isSpaceLike(unsigned char c) {
+  // Treat standard whitespace plus 0xA0/0xC2 (common NBSP bytes) as whitespace.
+  return isspace(c) || c == 0xA0 || c == 0xC2;
+}
+
 static const char* trimLeft(const char* ptr) {
-  while (ptr && *ptr && isspace((unsigned char)*ptr)) {
+  while (ptr && *ptr && isSpaceLike((unsigned char)*ptr)) {
     ++ptr;
   }
   return ptr;
@@ -1121,7 +1150,7 @@ static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& t
   if (dest_size == 0) return 0;
   const char* start = trimLeft(src);
   const char* end = start + strlen(start);
-  while (end > start && isspace((unsigned char)*(end - 1))) {
+  while (end > start && isSpaceLike((unsigned char)*(end - 1))) {
     --end;
   }
   size_t actual_len = (size_t)(end - start);
@@ -1395,16 +1424,10 @@ void MyMesh::sendRingtoneChannelReply(int channel_idx, const char* text) {
 void MyMesh::summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only) {
   (void)from;
   char response[256];
-  size_t overrides = 0;
-  for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
-    if (_deviceRingtones[i].in_use && _deviceRingtones[i].tone[0]) {
-      overrides++;
-    }
-  }
   if (_globalRingtone[0]) {
-    snprintf(response, sizeof(response), "Global ringtone: %s | overrides: %u", _globalRingtone, (unsigned)overrides);
+    snprintf(response, sizeof(response), "Ringtone: %s", _globalRingtone);
   } else {
-    snprintf(response, sizeof(response), "Global ringtone not set | overrides: %u", (unsigned)overrides);
+    snprintf(response, sizeof(response), "Ringtone not set");
   }
   if (local_only) {
     if (channel_idx >= 0) {
@@ -1421,7 +1444,8 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_
     return false; // ignore private /ringtone commands
   }
   if (!text) return false;
-  if (strncmp(text, "/ringtone", 9) != 0) {
+  const char* cmd = trimLeft(text);
+  if (strncmp(cmd, "/ringtone", 9) != 0) {
     return false;
   }
 
@@ -1436,8 +1460,9 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_
     }
   };
 
-  const char* args = trimLeft(text + 9);
-  if (*args == 0 || *args == '?') {
+  // Space-delimited parsing; empty -> status query.
+  const char* args = trimLeft(cmd + 9);
+  if (*args == 0 || matchesToken(args, "list")) {
     summarizeRingtoneStatus(from, channel_idx, local_only);
     return true;
   }
@@ -1450,8 +1475,23 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_
   char tone[ringtone_cfg::kMaxToneLen];
   bool truncated = false;
   size_t actual_len = copyTrimmed(args, tone, sizeof(tone), truncated);
+  // If payload is only whitespace, treat as status query instead of update.
   if (actual_len == 0) {
-    reply("Ringtone error: empty payload");
+    summarizeRingtoneStatus(from, channel_idx, local_only);
+    return true;
+  }
+
+  // Require at least one meaningful character (letter/digit/':') in payload; otherwise treat as status.
+  bool has_meaningful = false;
+  for (size_t i = 0; i < strlen(tone); ++i) {
+    unsigned char c = (unsigned char)tone[i];
+    if (isalnum(c) || c == ':') {
+      has_meaningful = true;
+      break;
+    }
+  }
+  if (!has_meaningful) {
+    summarizeRingtoneStatus(from, channel_idx, local_only);
     return true;
   }
 
@@ -1737,7 +1777,16 @@ void MyMesh::handleCmdFrame(size_t len) {
     uint32_t msg_timestamp;
     memcpy(&msg_timestamp, &cmd_frame[i], 4);
     i += 4;
-    const char *text = (char *)&cmd_frame[i];
+    char *text = (char *)&cmd_frame[i];
+    int tlen = len - i;
+    // Ensure the incoming text payload is null-terminated so command parsers
+    // (e.g. /ringtone) don't read past the frame when the app sends no payload.
+    if (tlen >= 0 && i + tlen < (int)sizeof(cmd_frame)) {
+      text[tlen] = 0;
+    } else {
+      // Fallback: clamp to buffer end to avoid UB; parsers will treat as empty.
+      cmd_frame[sizeof(cmd_frame) - 1] = 0;
+    }
 
     ChannelDetails channel;
     bool success = getChannel(channel_idx, channel);
