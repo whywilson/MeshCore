@@ -484,6 +484,31 @@ bool DataStore::saveRingtoneBlob(const uint8_t* src, size_t len) {
   return written == len;
 }
 
+#ifdef HEADLESS_CANNED_MESSAGES
+bool DataStore::loadTapTarget(TapTargetPrefs& prefs) {
+  File file = openRead(_getContactsChannelsFS(), "/tap_target");
+  if (!file) {
+    return false;
+  }
+  size_t read_len = file.read((uint8_t*)&prefs, sizeof(prefs));
+  file.close();
+  if (read_len != sizeof(prefs)) {
+    return false;
+  }
+  return prefs.version == TapTargetPrefs::kVersion;
+}
+
+bool DataStore::saveTapTarget(const TapTargetPrefs& prefs) {
+  File file = openWrite(_getContactsChannelsFS(), "/tap_target");
+  if (!file) {
+    return false;
+  }
+  size_t written = file.write((const uint8_t*)&prefs, sizeof(prefs));
+  file.close();
+  return written == sizeof(prefs);
+}
+#endif
+
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
 
 #define MAX_ADVERT_PKT_LEN   (2 + 32 + PUB_KEY_SIZE + 4 + SIGNATURE_SIZE + MAX_ADVERT_DATA_SIZE)

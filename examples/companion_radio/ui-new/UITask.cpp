@@ -603,6 +603,20 @@ void UITask::playRingtone(const char* melody) {
 #endif
 }
 
+void UITask::onNotifyModeChanged(uint8_t mode) {
+#if defined(PIN_BUZZER)
+  // When toggling from OFF to an active mode, ensure the buzzer is un-muted;
+  // when switching to OFF, silence immediately.
+  if (mode == NOTIFY_MODE_OFF) {
+    buzzer.quiet(true);
+  } else if (buzzer.isQuiet()) {
+    buzzer.quiet(false);
+  }
+#else
+  (void)mode;
+#endif
+}
+
 
 void UITask::msgRead(int msgcount) {
   _msgcount = msgcount;

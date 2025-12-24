@@ -108,6 +108,19 @@ public:
   const char* getHeadlessCannedMessage(size_t idx) const { return (idx < _cannedMessageCount) ? _cannedMessages[idx] : ""; }
   void logLocalChannelMessage(uint8_t channel_idx, const char* text);
 
+#ifdef HEADLESS_CANNED_MESSAGES
+  enum class TapTargetType : uint8_t { Channel = 0, Contact = 1 };
+  struct TapTargetState {
+    TapTargetType type = TapTargetType::Channel;
+    uint8_t channel_idx = 0;
+    ChannelDetails channel;
+    ContactInfo contact;
+  };
+
+  bool resolveTapTarget(TapTargetState& out);
+  void describeTapTarget(char* dest, size_t len) const;
+#endif
+
   void loop();
   void handleCmdFrame(size_t len);
   bool advert();
@@ -209,7 +222,19 @@ private:
   bool handleLocalBuzzerCommand(uint8_t channel_idx, const char* text);
   bool handleLocalPlayCommand(uint8_t channel_idx, const char* text);
   const char* describeNotifyMode(uint8_t mode) const;
+  void loadTapTargetPrefs();
+  void persistTapTargetPrefs();
+  void setDefaultTapTarget();
+  void setTapTargetChannel(uint8_t channel_idx, const ChannelDetails& channel);
+  void setTapTargetContact(const ContactInfo& contact);
+  void sendTapStatusToApp(int channel_idx, const char* message);
+  bool handleTapCommandForContact(const ContactInfo& contact, const char* text);
 #endif
+
+  bool computePacketHash(const mesh::Packet* pkt, uint8_t out_hash[MAX_HASH_SIZE]) const;
+  bool isRecentDuplicate(const uint8_t hash[MAX_HASH_SIZE]);
+  bool isDuplicateGroupMessage(const uint8_t hash[MAX_HASH_SIZE]);
+  bool shouldNotifyForPacket(const uint8_t hash[MAX_HASH_SIZE]);
 
   // helpers, short-cuts
   void savePrefs() { _store->savePrefs(_prefs, sensors.node_lat, sensors.node_lon); }
@@ -245,6 +270,7 @@ private:
 #ifdef HEADLESS_CANNED_MESSAGES
   char _globalRingtone[ringtone_cfg::kMaxToneLen];
   DeviceRingtone _deviceRingtones[ringtone_cfg::kMaxDeviceEntries];
+  TapTargetPrefs _tapTarget;
 #endif
 
   uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
@@ -259,6 +285,40 @@ private:
   };
   int offline_queue_len;
   Frame offline_queue[OFFLINE_QUEUE_SIZE];
+
+  // Group message replay guard: keyed by packet hash.
+  static constexpr uint8_t kRecentGrpSize = 24;
+  static constexpr uint32_t kRecentGrpTtlMs = 120000; // 2 minutes
+  struct RecentGroupEntry {
+    bool valid;
+    uint8_t hash[MAX_HASH_SIZE];
+    uint32_t seen_at_ms;
+  };
+  RecentGroupEntry _recent_grp[kRecentGrpSize];
+  uint8_t _recent_grp_idx;
+
+  // Short recent-packet cache to suppress duplicate flood/forward copies.
+  static constexpr uint8_t kRecentRxSize = 16;
+  static constexpr uint32_t kRecentRxTtlMs = 60000; // 60s window is plenty for replays
+  struct RecentRxEntry {
+    bool valid;
+    uint8_t hash[MAX_HASH_SIZE];
+    uint32_t seen_at_ms;
+  };
+  RecentRxEntry _recent_rx[kRecentRxSize];
+  uint8_t _recent_rx_idx;
+
+  // Prevent repeated ringtone starts for the same packet hash.
+  struct LastNotify {
+    bool valid;
+    uint8_t hash[MAX_HASH_SIZE];
+    uint32_t seen_at_ms;
+  };
+  LastNotify _last_notify;
+
+  // CW-mode: suppress repeat playback for identical packet hashes.
+  bool _last_cw_group_valid;
+  uint8_t _last_cw_group_hash[MAX_HASH_SIZE];
 
   struct AckTableEntry {
     unsigned long msg_sent;

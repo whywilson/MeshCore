@@ -85,6 +85,8 @@ public:
   void notify(UIEventType t = UIEventType::none) override;
   void loop() override;
   void playRingtone(const char* melody) override;
+  void onNotifyModeChanged(uint8_t mode) override;
+  bool isPlayingRingtone() override;
 
   void shutdown(bool restart = false);
 };

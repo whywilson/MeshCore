@@ -349,7 +349,31 @@ void UITask::loop() {
   userLedHandler();
 
 #ifdef PIN_BUZZER
-  if (buzzer.isPlaying())  buzzer.loop();
+  static bool _buzzerWasPlaying = false;
+  static uint32_t _buzzStartMs = 0;
+  if (buzzer.isPlaying())  {
+    if (!_buzzerWasPlaying) {
+      _buzzStartMs = millis();
+      Serial.printf("[CW] buzzer start t=%lu\n", (unsigned long)_buzzStartMs);
+      _buzzerWasPlaying = true;
+    }
+    buzzer.loop();
+  } else {
+    if (_buzzerWasPlaying) {
+      uint32_t now = millis();
+      Serial.printf("[CW] buzzer stop dur=%lu busy=%d queue=%u\n", (unsigned long)(now - _buzzStartMs),
+                    buzzer.isPlaying() ? 1 : 0, _cwCount);
+      _buzzerWasPlaying = false;
+    }
+    // Drain CW queue when buzzer is free.
+    if (_cwCount > 0) {
+      Serial.printf("[CW] pop head=%u count=%u len=%u\n", _cwHead, _cwCount,
+                    (unsigned)strlen(_cwQueue[_cwHead]));
+      buzzer.play(_cwQueue[_cwHead]);
+      _cwHead = (_cwHead + 1) % kCwQueueCapacity;
+      --_cwCount;
+    }
+  }
 #endif
 
   if (_display != NULL && _display->isOn()) {
@@ -420,9 +444,9 @@ bool UITask::sendCurrentCannedMessage() {
     return false;
   }
 
-  ChannelDetails channel;
-  if (!the_mesh.getChannel(0, channel)) {
-    MESH_DEBUG_PRINTLN("UITask: no primary channel for canned message");
+  MyMesh::TapTargetState target;
+  if (!the_mesh.resolveTapTarget(target)) {
+    MESH_DEBUG_PRINTLN("UITask: no tap target for canned message");
     playCannedTone(kToneCannedError);
     return false;
   }
@@ -431,10 +455,24 @@ bool UITask::sendCurrentCannedMessage() {
   uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
   const char *sender = (_node_prefs != NULL) ? _node_prefs->node_name : "";
 
-  bool ok = the_mesh.sendGroupMessage(timestamp, channel.channel, sender, text,
-                                      strlen(text));
+  bool ok = false;
+  if (target.type == MyMesh::TapTargetType::Channel) {
+    ok = the_mesh.sendGroupMessage(timestamp, target.channel.channel, sender, text,
+                                   strlen(text));
+    if (ok) {
+      the_mesh.logLocalChannelMessage(target.channel_idx, text);
+    }
+  } else {
+    uint32_t expected_ack = 0;
+    uint32_t est_timeout = 0;
+    int result = the_mesh.sendMessage(target.contact, timestamp, 0, text, expected_ack, est_timeout);
+    ok = result != MSG_SEND_FAILED;
+    if (ok) {
+      the_mesh.logLocalChannelMessage(0, text);
+    }
+  }
+
   if (ok) {
-    the_mesh.logLocalChannelMessage(0, text);
     playCannedTone(kToneCannedSend);
     MESH_DEBUG_PRINTLN("UITask: canned message sent -> %s", text);
     if (_display != NULL) {
@@ -627,7 +665,42 @@ void UITask::playRingtone(const char* melody) {
   if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
     return;
   }
+#if defined(PIN_BUZZER)
+  // In CW mode, always enqueue so playback path is unified and not interrupted mid-stream.
+  if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_CW && melody) {
+    if (_cwCount < kCwQueueCapacity) {
+      StrHelper::strncpy(_cwQueue[_cwTail], melody, kCwMaxLen);
+      _cwTail = (_cwTail + 1) % kCwQueueCapacity;
+      ++_cwCount;
+      Serial.printf("[CW] enqueue tail=%u count=%u len=%u\n", _cwTail, _cwCount, (unsigned)strlen(melody));
+      // If buzzer idle, start immediately from head to avoid delay.
+      if (!buzzer.isPlaying()) {
+        Serial.printf("[CW] kick play head=%u\n", _cwHead);
+        buzzer.play(_cwQueue[_cwHead]);
+        _cwHead = (_cwHead + 1) % kCwQueueCapacity;
+        --_cwCount;
+      }
+    }
+    return;
+  }
+#endif
+  Serial.printf("[CW] play immediate len=%u\n", melody ? (unsigned)strlen(melody) : 0);
   playTone(melody);
+#if defined(PIN_BUZZER)
+  Serial.printf("[CW] after play isPlaying=%d quiet=%d\n", buzzer.isPlaying() ? 1 : 0, buzzer.isQuiet() ? 1 : 0);
+#endif
+}
+
+void UITask::onNotifyModeChanged(uint8_t mode) {
+#ifdef PIN_BUZZER
+  if (mode == NOTIFY_MODE_OFF) {
+    buzzer.quiet(true);
+  } else if (buzzer.isQuiet()) {
+    buzzer.quiet(false);
+  }
+#else
+  (void)mode;
+#endif
 }
 
 bool UITask::toggleGPSSetting(bool &enabledOut) {

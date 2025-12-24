@@ -6,6 +6,18 @@
 #include "NodePrefs.h"
 #include "CannedMessages.h"
 
+#ifdef HEADLESS_CANNED_MESSAGES
+struct TapTargetPrefs {
+  static constexpr uint8_t kVersion = 1;
+  uint8_t version = kVersion;
+  uint8_t type = 0;          // 0 = channel, 1 = contact
+  uint8_t channel_idx = 0;
+  uint8_t reserved = 0;
+  uint8_t contact_pub_key[PUB_KEY_SIZE] = {0};
+  char name[32] = {0};
+};
+#endif
+
 class DataStoreHost {
 public:
   virtual bool onContactLoaded(const ContactInfo& contact) =0;
@@ -44,6 +56,10 @@ public:
   bool saveCannedMessages(const char src[][canned::kMaxMessageLen], size_t count);
   bool loadRingtoneBlob(uint8_t* dest, size_t max_len, size_t& out_len);
   bool saveRingtoneBlob(const uint8_t* src, size_t len);
+#ifdef HEADLESS_CANNED_MESSAGES
+  bool loadTapTarget(TapTargetPrefs& prefs);
+  bool saveTapTarget(const TapTargetPrefs& prefs);
+#endif
   void migrateToSecondaryFS();
   uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);
   bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len);

@@ -23,6 +23,12 @@ class UITask : public AbstractUITask {
   SensorManager* _sensors;
 #ifdef PIN_BUZZER
   genericBuzzer buzzer;
+  static constexpr uint8_t kCwQueueCapacity = 4;
+  static constexpr uint16_t kCwMaxLen = 520;
+  char _cwQueue[kCwQueueCapacity][kCwMaxLen];
+  uint8_t _cwHead = 0;
+  uint8_t _cwTail = 0;
+  uint8_t _cwCount = 0;
 #endif
   unsigned long _next_refresh, _auto_off;
   NodePrefs* _node_prefs;
@@ -91,6 +97,7 @@ public:
   void notify(UIEventType t = UIEventType::none) override;
   void loop() override;
   void playRingtone(const char* melody) override;
+  void onNotifyModeChanged(uint8_t mode) override;
 
   void shutdown(bool restart = false);
 };

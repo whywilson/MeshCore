@@ -370,7 +370,6 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
     frame[0] = PUSH_CODE_MSG_WAITING; // send push 'tickle'
     _serial->writeFrame(frame, 1);
   }
-
 #ifdef DISPLAY_CLASS
   // we only want to show text messages on display, not cli data
   bool should_display = txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN;
@@ -466,6 +465,57 @@ static inline bool isNotifyDelimiter(char c) {
   return c == 0 || isspace((unsigned char)c) || c == ',' || c == ';' || c == '|' || c == '\\' || c == '/';
 }
 
+namespace {
+static inline bool isSpaceLike(unsigned char c) {
+  return isspace(c) || c == 0xA0 || c == 0xC2;
+}
+
+static const char* trimLeft(const char* ptr) {
+  while (ptr && *ptr && isSpaceLike((unsigned char)*ptr)) {
+    ++ptr;
+  }
+  return ptr;
+}
+
+static bool matchesToken(const char* text, const char* token) {
+  size_t i = 0;
+  while (token[i] && text[i]) {
+    if (tolower((unsigned char)text[i]) != tolower((unsigned char)token[i])) {
+      return false;
+    }
+    ++i;
+  }
+  if (token[i] != 0) return false;
+  return text[i] == 0 || isspace((unsigned char)text[i]);
+}
+
+static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& truncated) {
+  truncated = false;
+  if (dest_size == 0) return 0;
+  const char* start = trimLeft(src);
+  const char* end = start + strlen(start);
+  while (end > start && isSpaceLike((unsigned char)*(end - 1))) {
+    --end;
+  }
+  size_t actual_len = (size_t)(end - start);
+  size_t copy_len = actual_len;
+  if (copy_len >= dest_size) {
+    copy_len = dest_size - 1;
+    truncated = true;
+  }
+  if (copy_len > 0) {
+    memcpy(dest, start, copy_len);
+  }
+  dest[copy_len] = 0;
+  return actual_len;
+}
+
+static uint8_t* ringtoneScratch() {
+  static uint8_t blob[ringtone_cfg::kBlobMaxLen];
+  return blob;
+}
+} // namespace
+
 // Standard Morse: mapping to '.' (dot) and '-' (dash)
 static const char* getMorseCode(char c) {
   c = toupper((unsigned char)c);
@@ -512,15 +562,13 @@ static const char* getMorseCode(char c) {
 
 // Build RTTTL string approximating Morse timing
 // Returns true if at least one dot/dash was emitted
-// dot  = 1 unit beep, dash = 3 units beep
+// dot  = 1 unit beep, dash ≈ 4 units (slightly longer for clarity)
 // intra-element gap = 1 unit silence, inter-letter gap ≈ 3 units, word gap ≈ 7 units
 static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len) {
   if (!message || !rtttl_out || max_len == 0) return false;
 
   size_t pos = 0;
-  // Faster CW tempo with mid-range octave for ~550Hz tone (C#5 ≈ 554Hz)
-  // b=420 keeps dashes (~3 units) audible while shortening overall message time.
-  const char* header = "CW:d=8,o=5,b=420:";
+  const char* header = "CW:d=8,o=5,b=480:";
   size_t hdr_len = strlen(header);
   if (hdr_len >= max_len) {
     rtttl_out[0] = 0;
@@ -560,9 +608,9 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
       continue; // skip unsupported chars
     }
 
-    // For each element in the letter
-    static const char kDotNote[] = "c#";   // ≈554Hz at octave 5
-    static const char kDashNote[] = "3c#"; // 3 units of same tone
+    // Explicit durations required by RTTTL spec
+    static const char kDotNote[] = "8c#";  // single unit (~dot)
+    static const char kDashNote[] = "2c#"; // ~4 units (~dash)
     for (size_t j = 0; code[j] && pos + 5 < max_len; ++j) {
       // beep: dot or dash
       if (needComma && pos < max_len - 1) rtttl_out[pos++] = ',';
@@ -583,17 +631,18 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
       }
       needComma = true;
 
-      // intra-element gap: 1 unit of silence ("p")
-      if (pos + 2 >= max_len) break;
+      // intra-element gap: 1 unit of silence (explicit 8th rest)
+      if (pos + 3 >= max_len) break;
       rtttl_out[pos++] = ',';
+      rtttl_out[pos++] = '8';
       rtttl_out[pos++] = 'p';
       needComma = true;
     }
 
-    // extra inter-letter gap of ~2 units (we already had 1 unit from last 'p')
+    // extra inter-letter gap of ~2 units (we already had 1 unit from last rest)
     if (pos + 3 >= max_len) break;
     rtttl_out[pos++] = ',';
-    rtttl_out[pos++] = '2';
+    rtttl_out[pos++] = '4';
     rtttl_out[pos++] = 'p';
     needComma = true;
   }
@@ -603,12 +652,194 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
   } else {
     rtttl_out[max_len - 1] = 0;
   }
+  Serial.printf("[CW] build msgLen=%u rtttlLen=%u\n", (unsigned)strlen(message), (unsigned)strlen(rtttl_out));
   return emitted;
+}
+
+// Compute a lightweight hash of text content for notification dedupe (ignores routing/path changes).
+static bool computeTextHash(const char* text, uint8_t out_hash[MAX_HASH_SIZE]) {
+  if (!text || !out_hash) return false;
+  // 32-bit FNV-1a then expand to 16 bytes by repetition
+  uint32_t h = 2166136261u;
+  for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
+    h ^= *p;
+    h *= 16777619u;
+  }
+  for (int i = 0; i < MAX_HASH_SIZE; ++i) {
+    out_hash[i] = (uint8_t)((h >> ((i % 4) * 8)) & 0xFF);
+  }
+  return true;
+}
+
+// For CW, truncate overly long RTTTL to reduce overrun; ensure trailing null.
+static void clampRtttl(char* buf, size_t max_len) {
+  if (!buf || max_len == 0) return;
+  size_t len = strlen(buf);
+  if (len >= max_len) {
+    buf[max_len - 1] = '\0';
+  }
+}
+
+static uint16_t countRtttlTokens(const char* s) {
+  if (!s) return 0;
+  uint16_t cnt = 0;
+  bool in_token = false;
+  for (const char* p = s; *p; ++p) {
+    if (*p == ',') {
+      if (in_token) ++cnt;
+      in_token = false;
+    } else {
+      in_token = true;
+    }
+  }
+  if (in_token) ++cnt;
+  return cnt;
 }
 
 void MyMesh::sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text) {
   if (text == NULL) return;
   logLocalChannelMessage(channel_idx, text);
+}
+
+void MyMesh::setDefaultTapTarget() {
+  _tapTarget.version = TapTargetPrefs::kVersion;
+  _tapTarget.type = static_cast<uint8_t>(TapTargetType::Channel);
+  _tapTarget.channel_idx = 0;
+  _tapTarget.reserved = 0;
+  memset(_tapTarget.contact_pub_key, 0, sizeof(_tapTarget.contact_pub_key));
+  StrHelper::strzcpy(_tapTarget.name, "Public", sizeof(_tapTarget.name));
+}
+
+void MyMesh::persistTapTargetPrefs() {
+  _store->saveTapTarget(_tapTarget);
+}
+
+void MyMesh::loadTapTargetPrefs() {
+  setDefaultTapTarget();
+
+  TapTargetPrefs stored;
+  if (_store->loadTapTarget(stored) && stored.version == TapTargetPrefs::kVersion) {
+    _tapTarget = stored;
+  }
+
+  if (_tapTarget.type == static_cast<uint8_t>(TapTargetType::Contact)) {
+    ContactInfo* found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
+    if (found) {
+      StrHelper::strzcpy(_tapTarget.name, found->name, sizeof(_tapTarget.name));
+      return;
+    }
+  }
+
+  _tapTarget.type = static_cast<uint8_t>(TapTargetType::Channel);
+  ChannelDetails channel;
+  if (getChannel(_tapTarget.channel_idx, channel)) {
+    StrHelper::strzcpy(_tapTarget.name, channel.name, sizeof(_tapTarget.name));
+  } else if (getChannel(0, channel)) {
+    _tapTarget.channel_idx = 0;
+    StrHelper::strzcpy(_tapTarget.name, channel.name, sizeof(_tapTarget.name));
+  }
+
+  persistTapTargetPrefs();
+}
+
+void MyMesh::setTapTargetChannel(uint8_t channel_idx, const ChannelDetails& channel) {
+  _tapTarget.version = TapTargetPrefs::kVersion;
+  _tapTarget.type = static_cast<uint8_t>(TapTargetType::Channel);
+  _tapTarget.channel_idx = channel_idx;
+  memset(_tapTarget.contact_pub_key, 0, sizeof(_tapTarget.contact_pub_key));
+  StrHelper::strzcpy(_tapTarget.name, channel.name, sizeof(_tapTarget.name));
+  persistTapTargetPrefs();
+}
+
+void MyMesh::setTapTargetContact(const ContactInfo& contact) {
+  _tapTarget.version = TapTargetPrefs::kVersion;
+  _tapTarget.type = static_cast<uint8_t>(TapTargetType::Contact);
+  _tapTarget.channel_idx = 0;
+  memcpy(_tapTarget.contact_pub_key, contact.id.pub_key, sizeof(_tapTarget.contact_pub_key));
+  StrHelper::strzcpy(_tapTarget.name, contact.name, sizeof(_tapTarget.name));
+  persistTapTargetPrefs();
+}
+
+void MyMesh::sendTapStatusToApp(int channel_idx, const char* message) {
+  if (!message || !*message) return;
+  if (channel_idx >= 0) {
+    sendLocalChannelSystemMessage((uint8_t)channel_idx, message);
+  } else {
+    emitChannelMessageToApp(0, 0, getRTCClock()->getCurrentTimeUnique(), message, 0, "System", TXT_TYPE_CLI_DATA);
+  }
+}
+
+bool MyMesh::handleTapCommandForContact(const ContactInfo& contact, const char* text) {
+  if (!text) return false;
+  const char* cmd = trimLeft(text);
+  if (strncmp(cmd, "/tap", 4) != 0) {
+    return false;
+  }
+
+  const char* args = trimLeft(cmd + 4);
+  if (*args && matchesToken(args, "here")) {
+    setTapTargetContact(contact);
+  }
+
+  char response[96];
+  describeTapTarget(response, sizeof(response));
+  sendTapStatusToApp(-1, response);
+  return true;
+}
+
+bool MyMesh::resolveTapTarget(TapTargetState& out) {
+  if (_tapTarget.type == static_cast<uint8_t>(TapTargetType::Contact)) {
+    ContactInfo* found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
+    if (found) {
+      out.type = TapTargetType::Contact;
+      out.contact = *found;
+      out.channel_idx = 0;
+      return true;
+    }
+  }
+
+  ChannelDetails channel;
+  uint8_t idx = _tapTarget.channel_idx;
+  if (!getChannel(idx, channel)) {
+    if (!getChannel(0, channel)) {
+      return false;
+    }
+    idx = 0;
+  }
+
+  out.type = TapTargetType::Channel;
+  out.channel_idx = idx;
+  out.channel = channel;
+
+  bool changed = false;
+  if (_tapTarget.type != static_cast<uint8_t>(TapTargetType::Channel)) {
+    _tapTarget.type = static_cast<uint8_t>(TapTargetType::Channel);
+    changed = true;
+  }
+  if (_tapTarget.channel_idx != idx || strncmp(_tapTarget.name, channel.name, sizeof(_tapTarget.name)) != 0) {
+    _tapTarget.channel_idx = idx;
+    StrHelper::strzcpy(_tapTarget.name, channel.name, sizeof(_tapTarget.name));
+    changed = true;
+  }
+
+  if (changed) {
+    persistTapTargetPrefs();
+  }
+
+  return true;
+}
+
+void MyMesh::describeTapTarget(char* dest, size_t len) const {
+  if (!dest || len == 0) return;
+  TapTargetState state;
+  MyMesh* self = const_cast<MyMesh*>(this);
+  if (self->resolveTapTarget(state)) {
+    const char* name = (state.type == TapTargetType::Channel) ? state.channel.name : state.contact.name;
+    const char* kind = (state.type == TapTargetType::Channel) ? "channel" : "device";
+    snprintf(dest, len, "Tap target: %s (%s)", (name && *name) ? name : "Unknown", kind);
+  } else {
+    snprintf(dest, len, "Tap target: unavailable");
+  }
 }
 
 const char* MyMesh::describeNotifyMode(uint8_t mode) const {
@@ -705,6 +936,10 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
   _prefs.notify_mode = new_mode;
   savePrefs();
 
+  if (_ui) {
+    _ui->onNotifyModeChanged(new_mode);
+  }
+
   char response[64];
   snprintf(response, sizeof(response), "Buzzer mode set to %s", describeNotifyMode(new_mode));
   sendLocalChannelSystemMessage(channel_idx, response);
@@ -716,6 +951,73 @@ bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
   // REVISIT: try to determine which Region (from transport_codes[1]) that Sender is indicating for replies/responses
   //    if unknown, fallback to finding Region from transport_codes[0], the 'scope' used by Sender
   return false;
+}
+
+bool MyMesh::computePacketHash(const mesh::Packet* pkt, uint8_t out_hash[MAX_HASH_SIZE]) const {
+  if (!pkt || !out_hash) return false;
+  pkt->calculatePacketHash(out_hash);
+  return true;
+}
+
+bool MyMesh::isDuplicateGroupMessage(const uint8_t hash[MAX_HASH_SIZE]) {
+  if (!hash) return false;
+  uint32_t now = _ms->getMillis();
+  for (auto &entry : _recent_grp) {
+    if (entry.valid && (now - entry.seen_at_ms > kRecentGrpTtlMs)) {
+      entry.valid = false; // expire
+    }
+    if (entry.valid && memcmp(entry.hash, hash, MAX_HASH_SIZE) == 0) {
+      return true; // already seen this group packet hash
+    }
+  }
+
+  RecentGroupEntry &slot = _recent_grp[_recent_grp_idx];
+  slot.valid = true;
+  slot.seen_at_ms = now;
+  memcpy(slot.hash, hash, MAX_HASH_SIZE);
+  _recent_grp_idx = (_recent_grp_idx + 1) % kRecentGrpSize;
+  return false;
+}
+
+bool MyMesh::isRecentDuplicate(const uint8_t hash[MAX_HASH_SIZE]) {
+  if (!hash) return false;
+
+  uint32_t now = _ms->getMillis();
+
+  for (auto &entry : _recent_rx) {
+    if (entry.valid && (now - entry.seen_at_ms > kRecentRxTtlMs)) {
+      entry.valid = false; // expire old entries
+    }
+    if (entry.valid && memcmp(entry.hash, hash, MAX_HASH_SIZE) == 0) {
+      return true; // seen recently; treat as replay/forward copy
+    }
+  }
+
+  RecentRxEntry &slot = _recent_rx[_recent_rx_idx];
+  slot.valid = true;
+  slot.seen_at_ms = now;
+  memcpy(slot.hash, hash, MAX_HASH_SIZE);
+  _recent_rx_idx = (_recent_rx_idx + 1) % kRecentRxSize;
+  return false;
+}
+
+bool MyMesh::shouldNotifyForPacket(const uint8_t hash[MAX_HASH_SIZE]) {
+  if (!hash) return true;
+  uint32_t now = _ms->getMillis();
+
+  // Expire old last-notify record after 2 minutes to avoid blocking fresh content.
+  if (_last_notify.valid && (now - _last_notify.seen_at_ms > 120000)) {
+    _last_notify.valid = false;
+  }
+
+  if (_last_notify.valid && memcmp(_last_notify.hash, hash, MAX_HASH_SIZE) == 0) {
+    return false; // already notified for this packet hash
+  }
+
+  _last_notify.valid = true;
+  _last_notify.seen_at_ms = now;
+  memcpy(_last_notify.hash, hash, MAX_HASH_SIZE);
+  return true;
 }
 
 void MyMesh::sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis) {
@@ -743,18 +1045,30 @@ void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pk
 
 void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                            const char *text) {
+  uint8_t pkt_hash[MAX_HASH_SIZE];
+  if (!computePacketHash(pkt, pkt_hash)) return;
+  if (isRecentDuplicate(pkt_hash)) return;
+  if (!shouldNotifyForPacket(pkt_hash)) return;
   markConnectionActive(from); // in case this is from a server, and we have a connection
   queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
 }
 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                                const char *text) {
+  uint8_t pkt_hash[MAX_HASH_SIZE];
+  if (!computePacketHash(pkt, pkt_hash)) return;
+  if (isRecentDuplicate(pkt_hash)) return;
+  if (!shouldNotifyForPacket(pkt_hash)) return;
   markConnectionActive(from); // in case this is from a server, and we have a connection
   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
 void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                                  const uint8_t *sender_prefix, const char *text) {
+  uint8_t pkt_hash[MAX_HASH_SIZE];
+  if (!computePacketHash(pkt, pkt_hash)) return;
+  if (isRecentDuplicate(pkt_hash)) return;
+  if (!shouldNotifyForPacket(pkt_hash)) return;
   markConnectionActive(from);
   // from.sync_since change needs to be persisted
   dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
@@ -763,14 +1077,56 @@ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uin
 
 void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t timestamp,
                                   const char *text) {
+  uint8_t pkt_hash[MAX_HASH_SIZE];
+  if (!computePacketHash(pkt, pkt_hash)) return;
+  // Drop duplicates before we decide about ringing to avoid interrupting ongoing CW.
+  bool dup_group = isDuplicateGroupMessage(pkt_hash);
+  if (dup_group) {
+    Serial.printf("[CHAN] drop duplicate group hash=%02X%02X%02X%02X\n", pkt_hash[0], pkt_hash[1], pkt_hash[2],
+                  pkt_hash[3]);
+    return; // ignore forwarded duplicates by packet hash
+  }
+
+  bool recent_dup = isRecentDuplicate(pkt_hash);
+  if (recent_dup) {
+    Serial.printf("[CHAN] drop recent dup hash=%02X%02X%02X%02X\n", pkt_hash[0], pkt_hash[1], pkt_hash[2],
+                  pkt_hash[3]);
+    return; // drop further handling for duplicate copies
+  }
+
+  // Decide whether to ring once for this hash.
+  bool should_ring = false;
+  uint8_t notify_hash[MAX_HASH_SIZE];
+  const uint8_t* ring_hash = pkt_hash;
+  if (_prefs.notify_mode == NOTIFY_MODE_CW) {
+    if (computeTextHash(text, notify_hash)) {
+      ring_hash = notify_hash; // dedupe by content so forwarded copies share hash
+    }
+    should_ring = !_last_cw_group_valid || memcmp(_last_cw_group_hash, ring_hash, MAX_HASH_SIZE) != 0;
+  } else {
+    should_ring = shouldNotifyForPacket(pkt_hash);
+  }
+
+  Serial.printf("[CHAN] hash=%02X%02X%02X%02X ringHash=%02X%02X%02X%02X mode=%u ring=%d textLen=%d path=%u\n",
+                pkt_hash[0], pkt_hash[1], pkt_hash[2], pkt_hash[3], ring_hash[0], ring_hash[1], ring_hash[2],
+                ring_hash[3], _prefs.notify_mode, should_ring ? 1 : 0, text ? (int)strlen(text) : -1,
+                pkt->isRouteFlood() ? pkt->path_len : 0xFF);
+
+  if (should_ring) {
+    maybePlayRingtone(NULL, text); // play once per unique hash
+    if (_prefs.notify_mode == NOTIFY_MODE_CW) {
+      _last_cw_group_valid = true;
+      memcpy(_last_cw_group_hash, ring_hash, MAX_HASH_SIZE);
+    }
+  } else if (_prefs.notify_mode != NOTIFY_MODE_CW) {
+    Serial.printf("[CHAN] no-ring mode%u hash=%02X%02X%02X%02X\n", _prefs.notify_mode, pkt_hash[0], pkt_hash[1],
+                  pkt_hash[2], pkt_hash[3]);
+  }
   int channel_idx_int = findChannelIdx(channel);
   uint8_t channel_idx = channel_idx_int < 0 ? 0xFF : (uint8_t)channel_idx_int;
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
   int8_t snr_quarter = (int8_t)(pkt->getSNR() * 4);
   emitChannelMessageToApp(channel_idx, path_len, timestamp, text, snr_quarter);
-#ifdef HEADLESS_CANNED_MESSAGES
-  maybePlayRingtone(NULL, text);
-#endif
 }
 
 uint8_t MyMesh::onContactRequest(const ContactInfo &contact, uint32_t sender_timestamp, const uint8_t *data,
@@ -1050,6 +1406,7 @@ enum class LocalCommand : uint8_t {
   Buz,
   Ringtone,
   Play,
+  Tap,
   Help,
   Count
 };
@@ -1059,6 +1416,7 @@ static constexpr const char* kLocalCommandNames[] = {
   "/buz",
   "/ringtone",
   "/play",
+  "/tap",
   "/help",
 };
 
@@ -1074,10 +1432,20 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
 #ifdef HEADLESS_CANNED_MESSAGES
   if (handleLocalBuzzerCommand(channel_idx, cmd)) return true;
   if (handleLocalPlayCommand(channel_idx, cmd)) return true;
+  if (strncmp(cmd, kLocalCommandNames[static_cast<size_t>(LocalCommand::Tap)], 4) == 0) {
+    const char* args = skipWhitespace(cmd + 4);
+    if (*args && matchesToken(args, "here")) {
+      setTapTargetChannel(channel_idx, channel);
+    }
+    char response[96];
+    describeTapTarget(response, sizeof(response));
+    sendTapStatusToApp(channel_idx, response);
+    return true;
+  }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
     const char* help =
-      "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]";
+      "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]\n/tap [here]";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
   }
@@ -1120,57 +1488,6 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
 }
 
 #ifdef HEADLESS_CANNED_MESSAGES
-namespace {
-static inline bool isSpaceLike(unsigned char c) {
-  // Treat standard whitespace plus 0xA0/0xC2 (common NBSP bytes) as whitespace.
-  return isspace(c) || c == 0xA0 || c == 0xC2;
-}
-
-static const char* trimLeft(const char* ptr) {
-  while (ptr && *ptr && isSpaceLike((unsigned char)*ptr)) {
-    ++ptr;
-  }
-  return ptr;
-}
-
-static bool matchesToken(const char* text, const char* token) {
-  size_t i = 0;
-  while (token[i] && text[i]) {
-    if (tolower((unsigned char)text[i]) != tolower((unsigned char)token[i])) {
-      return false;
-    }
-    ++i;
-  }
-  if (token[i] != 0) return false;
-  return text[i] == 0 || isspace((unsigned char)text[i]);
-}
-
-static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& truncated) {
-  truncated = false;
-  if (dest_size == 0) return 0;
-  const char* start = trimLeft(src);
-  const char* end = start + strlen(start);
-  while (end > start && isSpaceLike((unsigned char)*(end - 1))) {
-    --end;
-  }
-  size_t actual_len = (size_t)(end - start);
-  size_t copy_len = actual_len;
-  if (copy_len >= dest_size) {
-    copy_len = dest_size - 1;
-    truncated = true;
-  }
-  if (copy_len > 0) {
-    memcpy(dest, start, copy_len);
-  }
-  dest[copy_len] = 0;
-  return actual_len;
-}
-
-static uint8_t* ringtoneScratch() {
-  static uint8_t blob[ringtone_cfg::kBlobMaxLen];
-  return blob;
-}
-} // namespace
 
 void MyMesh::clearAllRingtones() {
   _globalRingtone[0] = 0;
@@ -1343,9 +1660,6 @@ const char* MyMesh::getRingtoneFor(const ContactInfo* from) const {
 void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
   if (_ui == NULL) return;
   uint8_t mode = _prefs.notify_mode;
-  if (mode > NOTIFY_MODE_OFF) {
-    mode = NOTIFY_MODE_RTTTL;
-  }
   if (mode == NOTIFY_MODE_OFF) {
     return;
   }
@@ -1402,11 +1716,22 @@ void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
       _ui->playRingtone(fallback);
       return;
     }
+    clampRtttl(cwBuffer, sizeof(cwBuffer));
+    uint16_t tokens = countRtttlTokens(cwBuffer);
+    Serial.printf("[CW] play cw rtttlLen=%u tokens=%u payloadLen=%u text='%.40s'\n",
+                  (unsigned)strlen(cwBuffer), tokens, (unsigned)strlen(payload), payload);
+    // Print first ~120 chars for debugging
+    char preview[128];
+    StrHelper::strncpy(preview, cwBuffer, sizeof(preview));
+    Serial.printf("[CW] rtttl='%s'\n", preview);
     _ui->playRingtone(cwBuffer);
   } else {
     const char* tone = getRingtoneFor(from);
     if (tone && tone[0]) {
       _ui->playRingtone(tone);
+    } else {
+      // Ensure we still emit an audible cue even when no RTTTL is configured.
+      _ui->playRingtone("d=8,o=5,b=400:4c,4p,4c");
     }
   }
 }
@@ -1547,6 +1872,23 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
       _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _ui(ui) {
   _iter_started = false;
   _cli_rescue = false;
+  _recent_grp_idx = 0;
+  for (auto &entry : _recent_grp) {
+    entry.valid = false;
+    entry.seen_at_ms = 0;
+    memset(entry.hash, 0, sizeof(entry.hash));
+  }
+  _recent_rx_idx = 0;
+  for (auto &entry : _recent_rx) {
+    entry.valid = false;
+    entry.seen_at_ms = 0;
+    memset(entry.hash, 0, sizeof(entry.hash));
+  }
+  _last_notify.valid = false;
+  _last_notify.seen_at_ms = 0;
+  memset(_last_notify.hash, 0, sizeof(_last_notify.hash));
+  _last_cw_group_valid = false;
+  memset(_last_cw_group_hash, 0, sizeof(_last_cw_group_hash));
   offline_queue_len = 0;
   app_target_ver = 0;
   clearPendingReqs();
@@ -1565,6 +1907,7 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
     memset(_deviceRingtones[i].pub_key, 0, sizeof(_deviceRingtones[i].pub_key));
     _deviceRingtones[i].updated_at = 0;
   }
+  setDefaultTapTarget();
 #endif
 
   // defaults
@@ -1613,6 +1956,7 @@ void MyMesh::begin(bool has_display) {
   _prefs.sf = constrain(_prefs.sf, 5, 12);
   _prefs.cr = constrain(_prefs.cr, 5, 8);
   _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, 1, MAX_LORA_TX_POWER);
+  // Only clamp invalid values; keep RTTTL or CW if they were persisted.
   if (_prefs.notify_mode > NOTIFY_MODE_OFF) {
     _prefs.notify_mode = NOTIFY_MODE_RTTTL;
   }
@@ -1643,6 +1987,7 @@ void MyMesh::begin(bool has_display) {
   loadHeadlessCannedMessages();
 #ifdef HEADLESS_CANNED_MESSAGES
   loadHeadlessRingtones();
+  loadTapTargetPrefs();
 #endif
 
   radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
@@ -1740,6 +2085,12 @@ void MyMesh::handleCmdFrame(size_t len) {
       int tlen = len - i;
       uint32_t est_timeout;
       text[tlen] = 0; // ensure null
+#ifdef HEADLESS_CANNED_MESSAGES
+      if (txt_type == TXT_TYPE_PLAIN && handleTapCommandForContact(*recipient, text)) {
+        writeOKFrame();
+        return;
+      }
+#endif
       int result;
       uint32_t expected_ack;
       if (txt_type == TXT_TYPE_CLI_DATA) {

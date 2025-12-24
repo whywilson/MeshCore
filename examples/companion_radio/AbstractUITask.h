@@ -44,4 +44,5 @@ public:
   virtual void notify(UIEventType t = UIEventType::none) = 0;
   virtual void loop() = 0;
   virtual void playRingtone(const char* melody) { (void)melody; }
+  virtual void onNotifyModeChanged(uint8_t mode) { (void)mode; }
 };
