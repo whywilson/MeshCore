@@ -97,6 +97,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButton->onShortPress([this]() { handleButtonShortPress(); });
   _userButton->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButton->onTriplePress([this]() { handleButtonTriplePress(); });
+  _userButton->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
   _userButton->onLongPress([this]() { handleButtonLongPress(); });
   _userButton->onLongHold([this]() { handleButtonLongHold(); });
   _userButton->onAnyPress([this]() { handleButtonAnyPress(); });
@@ -111,6 +112,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _userButtonAnalog->onShortPress([this]() { handleButtonShortPress(); });
   _userButtonAnalog->onDoublePress([this]() { handleButtonDoublePress(); });
   _userButtonAnalog->onTriplePress([this]() { handleButtonTriplePress(); });
+  _userButtonAnalog->onQuadruplePress([this]() { handleButtonQuadruplePress(); });
   _userButtonAnalog->onLongPress([this]() { handleButtonLongPress(); });
   _userButtonAnalog->onLongHold([this]() { handleButtonLongHold(); });
   _userButtonAnalog->onAnyPress([this]() { handleButtonAnyPress(); });
@@ -343,10 +345,29 @@ void UITask::loop() {
       _userButtonAnalog->update();
     }
   #endif
+
+  // Update LED state based on button press
+#ifdef PIN_STATUS_LED
+  bool buttonPressed = false;
+  #ifdef PIN_USER_BTN
+    if (_userButton && _userButton->isPressed()) {
+      buttonPressed = true;
+    }
+  #endif
+  #ifdef PIN_USER_BTN_ANA
+    if (_userButtonAnalog && _userButtonAnalog->isPressed()) {
+      buttonPressed = true;
+    }
+  #endif
+  // LED follows button state: on when pressed, off when released
+  digitalWrite(PIN_STATUS_LED, buttonPressed ? HIGH : LOW);
+#endif
+  
+  userLedHandler();
+
 #ifdef HEADLESS_CANNED_MESSAGES
   updateCannedMode();
 #endif
-  userLedHandler();
 
 #ifdef PIN_BUZZER
   static bool _buzzerWasPlaying = false;
@@ -627,6 +648,25 @@ void UITask::handleButtonTriplePress() {
   if (_display != NULL) _need_refresh = true;
 #endif
 #endif
+}
+
+void UITask::handleButtonQuadruplePress() {
+  MESH_DEBUG_PRINTLN("UITask: quadruple press triggered - Easter Egg!");
+  
+  // Easter egg: Play a special melody locally
+  const char* easterEggMelody = "/play wish:d=4,o=5,b=120:g,c6,8c6,8d6,8c6,8b,a,a,a,d6,8d6,8e6,8d6,8c6,b,g,g,e6,8e6,8f6,8e6,8d6,c6,a,8g,8g,a,d6,b,2c6";
+  
+#ifdef PIN_BUZZER
+  // Play the easter egg melody
+  playRingtone(easterEggMelody);
+#endif
+  
+  if (_display != NULL) {
+    snprintf(_alert, sizeof(_alert), "Easter Egg!");
+    _need_refresh = true;
+  }
+  
+  MESH_DEBUG_PRINTLN("UITask: Easter egg melody triggered");
 }
 
 void UITask::handleButtonLongPress() {

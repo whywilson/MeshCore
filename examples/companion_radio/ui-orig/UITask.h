@@ -58,6 +58,7 @@ class UITask : public AbstractUITask {
   void handleButtonShortPress();
   void handleButtonDoublePress();
   void handleButtonTriplePress();
+  void handleButtonQuadruplePress();
   void handleButtonLongPress();
   void handleButtonLongHold();
   void playTone(const char *melody);
