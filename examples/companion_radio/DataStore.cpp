@@ -228,6 +228,7 @@ void DataStore::loadPrefsInt(const char *filename, NodePrefs& _prefs, double& no
       _prefs.notify_mode = NOTIFY_MODE_RTTTL;
     }
     file.read((uint8_t *)&_prefs.ble_pin, sizeof(_prefs.ble_pin));                         // 80
+    file.read((uint8_t *)&_prefs.flipmute_enabled, sizeof(_prefs.flipmute_enabled));       // 84
 
     file.close();
   }
@@ -260,6 +261,7 @@ void DataStore::savePrefs(const NodePrefs& _prefs, double node_lat, double node_
     uint8_t notify_and_pad[2] = {_prefs.notify_mode, 0};
     file.write(notify_and_pad, 2);                                                          // 78
     file.write((uint8_t *)&_prefs.ble_pin, sizeof(_prefs.ble_pin));                         // 80
+    file.write((uint8_t *)&_prefs.flipmute_enabled, sizeof(_prefs.flipmute_enabled));       // 84
 
     file.close();
   }

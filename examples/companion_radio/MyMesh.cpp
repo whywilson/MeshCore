@@ -5,114 +5,114 @@
 #include <cctype>
 #include <cstring>
 
-#define CMD_APP_START                 1
-#define CMD_SEND_TXT_MSG              2
-#define CMD_SEND_CHANNEL_TXT_MSG      3
-#define CMD_GET_CONTACTS              4 // with optional 'since' (for efficient sync)
-#define CMD_GET_DEVICE_TIME           5
-#define CMD_SET_DEVICE_TIME           6
-#define CMD_SEND_SELF_ADVERT          7
-#define CMD_SET_ADVERT_NAME           8
-#define CMD_ADD_UPDATE_CONTACT        9
-#define CMD_SYNC_NEXT_MESSAGE         10
-#define CMD_SET_RADIO_PARAMS          11
-#define CMD_SET_RADIO_TX_POWER        12
-#define CMD_RESET_PATH                13
-#define CMD_SET_ADVERT_LATLON         14
-#define CMD_REMOVE_CONTACT            15
-#define CMD_SHARE_CONTACT             16
-#define CMD_EXPORT_CONTACT            17
-#define CMD_IMPORT_CONTACT            18
-#define CMD_REBOOT                    19
-#define CMD_GET_BATT_AND_STORAGE      20   // was CMD_GET_BATTERY_VOLTAGE
-#define CMD_SET_TUNING_PARAMS         21
-#define CMD_DEVICE_QEURY              22
-#define CMD_EXPORT_PRIVATE_KEY        23
-#define CMD_IMPORT_PRIVATE_KEY        24
-#define CMD_SEND_RAW_DATA             25
-#define CMD_SEND_LOGIN                26
-#define CMD_SEND_STATUS_REQ           27
-#define CMD_HAS_CONNECTION            28
-#define CMD_LOGOUT                    29 // 'Disconnect'
-#define CMD_GET_CONTACT_BY_KEY        30
-#define CMD_GET_CHANNEL               31
-#define CMD_SET_CHANNEL               32
-#define CMD_SIGN_START                33
-#define CMD_SIGN_DATA                 34
-#define CMD_SIGN_FINISH               35
-#define CMD_SEND_TRACE_PATH           36
-#define CMD_SET_DEVICE_PIN            37
-#define CMD_SET_OTHER_PARAMS          38
-#define CMD_SEND_TELEMETRY_REQ        39  // can deprecate this
-#define CMD_GET_CUSTOM_VARS           40
-#define CMD_SET_CUSTOM_VAR            41
-#define CMD_GET_ADVERT_PATH           42
-#define CMD_GET_TUNING_PARAMS         43
+#define CMD_APP_START                     1
+#define CMD_SEND_TXT_MSG                  2
+#define CMD_SEND_CHANNEL_TXT_MSG          3
+#define CMD_GET_CONTACTS                  4 // with optional 'since' (for efficient sync)
+#define CMD_GET_DEVICE_TIME               5
+#define CMD_SET_DEVICE_TIME               6
+#define CMD_SEND_SELF_ADVERT              7
+#define CMD_SET_ADVERT_NAME               8
+#define CMD_ADD_UPDATE_CONTACT            9
+#define CMD_SYNC_NEXT_MESSAGE             10
+#define CMD_SET_RADIO_PARAMS              11
+#define CMD_SET_RADIO_TX_POWER            12
+#define CMD_RESET_PATH                    13
+#define CMD_SET_ADVERT_LATLON             14
+#define CMD_REMOVE_CONTACT                15
+#define CMD_SHARE_CONTACT                 16
+#define CMD_EXPORT_CONTACT                17
+#define CMD_IMPORT_CONTACT                18
+#define CMD_REBOOT                        19
+#define CMD_GET_BATT_AND_STORAGE          20 // was CMD_GET_BATTERY_VOLTAGE
+#define CMD_SET_TUNING_PARAMS             21
+#define CMD_DEVICE_QEURY                  22
+#define CMD_EXPORT_PRIVATE_KEY            23
+#define CMD_IMPORT_PRIVATE_KEY            24
+#define CMD_SEND_RAW_DATA                 25
+#define CMD_SEND_LOGIN                    26
+#define CMD_SEND_STATUS_REQ               27
+#define CMD_HAS_CONNECTION                28
+#define CMD_LOGOUT                        29 // 'Disconnect'
+#define CMD_GET_CONTACT_BY_KEY            30
+#define CMD_GET_CHANNEL                   31
+#define CMD_SET_CHANNEL                   32
+#define CMD_SIGN_START                    33
+#define CMD_SIGN_DATA                     34
+#define CMD_SIGN_FINISH                   35
+#define CMD_SEND_TRACE_PATH               36
+#define CMD_SET_DEVICE_PIN                37
+#define CMD_SET_OTHER_PARAMS              38
+#define CMD_SEND_TELEMETRY_REQ            39 // can deprecate this
+#define CMD_GET_CUSTOM_VARS               40
+#define CMD_SET_CUSTOM_VAR                41
+#define CMD_GET_ADVERT_PATH               42
+#define CMD_GET_TUNING_PARAMS             43
 // NOTE: CMD range 44..49 parked, potentially for WiFi operations
-#define CMD_SEND_BINARY_REQ           50
-#define CMD_FACTORY_RESET             51
-#define CMD_SEND_PATH_DISCOVERY_REQ   52
-#define CMD_SET_FLOOD_SCOPE           54   // v8+
-#define CMD_SEND_CONTROL_DATA         55   // v8+
+#define CMD_SEND_BINARY_REQ               50
+#define CMD_FACTORY_RESET                 51
+#define CMD_SEND_PATH_DISCOVERY_REQ       52
+#define CMD_SET_FLOOD_SCOPE               54 // v8+
+#define CMD_SEND_CONTROL_DATA             55 // v8+
 
-#define RESP_CODE_OK                  0
-#define RESP_CODE_ERR                 1
-#define RESP_CODE_CONTACTS_START      2  // first reply to CMD_GET_CONTACTS
-#define RESP_CODE_CONTACT             3  // multiple of these (after CMD_GET_CONTACTS)
-#define RESP_CODE_END_OF_CONTACTS     4  // last reply to CMD_GET_CONTACTS
-#define RESP_CODE_SELF_INFO           5  // reply to CMD_APP_START
-#define RESP_CODE_SENT                6  // reply to CMD_SEND_TXT_MSG
-#define RESP_CODE_CONTACT_MSG_RECV    7  // a reply to CMD_SYNC_NEXT_MESSAGE (ver < 3)
-#define RESP_CODE_CHANNEL_MSG_RECV    8  // a reply to CMD_SYNC_NEXT_MESSAGE (ver < 3)
-#define RESP_CODE_CURR_TIME           9  // a reply to CMD_GET_DEVICE_TIME
-#define RESP_CODE_NO_MORE_MESSAGES    10 // a reply to CMD_SYNC_NEXT_MESSAGE
-#define RESP_CODE_EXPORT_CONTACT      11
-#define RESP_CODE_BATT_AND_STORAGE    12 // a reply to a CMD_GET_BATT_AND_STORAGE
-#define RESP_CODE_DEVICE_INFO         13 // a reply to CMD_DEVICE_QEURY
-#define RESP_CODE_PRIVATE_KEY         14 // a reply to CMD_EXPORT_PRIVATE_KEY
-#define RESP_CODE_DISABLED            15
-#define RESP_CODE_CONTACT_MSG_RECV_V3 16 // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
-#define RESP_CODE_CHANNEL_MSG_RECV_V3 17 // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
-#define RESP_CODE_CHANNEL_INFO        18 // a reply to CMD_GET_CHANNEL
-#define RESP_CODE_SIGN_START          19
-#define RESP_CODE_SIGNATURE           20
-#define RESP_CODE_CUSTOM_VARS         21
-#define RESP_CODE_ADVERT_PATH         22
-#define RESP_CODE_TUNING_PARAMS       23
+#define RESP_CODE_OK                      0
+#define RESP_CODE_ERR                     1
+#define RESP_CODE_CONTACTS_START          2  // first reply to CMD_GET_CONTACTS
+#define RESP_CODE_CONTACT                 3  // multiple of these (after CMD_GET_CONTACTS)
+#define RESP_CODE_END_OF_CONTACTS         4  // last reply to CMD_GET_CONTACTS
+#define RESP_CODE_SELF_INFO               5  // reply to CMD_APP_START
+#define RESP_CODE_SENT                    6  // reply to CMD_SEND_TXT_MSG
+#define RESP_CODE_CONTACT_MSG_RECV        7  // a reply to CMD_SYNC_NEXT_MESSAGE (ver < 3)
+#define RESP_CODE_CHANNEL_MSG_RECV        8  // a reply to CMD_SYNC_NEXT_MESSAGE (ver < 3)
+#define RESP_CODE_CURR_TIME               9  // a reply to CMD_GET_DEVICE_TIME
+#define RESP_CODE_NO_MORE_MESSAGES        10 // a reply to CMD_SYNC_NEXT_MESSAGE
+#define RESP_CODE_EXPORT_CONTACT          11
+#define RESP_CODE_BATT_AND_STORAGE        12 // a reply to a CMD_GET_BATT_AND_STORAGE
+#define RESP_CODE_DEVICE_INFO             13 // a reply to CMD_DEVICE_QEURY
+#define RESP_CODE_PRIVATE_KEY             14 // a reply to CMD_EXPORT_PRIVATE_KEY
+#define RESP_CODE_DISABLED                15
+#define RESP_CODE_CONTACT_MSG_RECV_V3     16 // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
+#define RESP_CODE_CHANNEL_MSG_RECV_V3     17 // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
+#define RESP_CODE_CHANNEL_INFO            18 // a reply to CMD_GET_CHANNEL
+#define RESP_CODE_SIGN_START              19
+#define RESP_CODE_SIGNATURE               20
+#define RESP_CODE_CUSTOM_VARS             21
+#define RESP_CODE_ADVERT_PATH             22
+#define RESP_CODE_TUNING_PARAMS           23
 
-#define SEND_TIMEOUT_BASE_MILLIS        500
-#define FLOOD_SEND_TIMEOUT_FACTOR       16.0f
-#define DIRECT_SEND_PERHOP_FACTOR       6.0f
-#define DIRECT_SEND_PERHOP_EXTRA_MILLIS 250
-#define LAZY_CONTACTS_WRITE_DELAY       5000
+#define SEND_TIMEOUT_BASE_MILLIS          500
+#define FLOOD_SEND_TIMEOUT_FACTOR         16.0f
+#define DIRECT_SEND_PERHOP_FACTOR         6.0f
+#define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
+#define LAZY_CONTACTS_WRITE_DELAY         5000
 
-#define PUBLIC_GROUP_PSK                "izOH6cXN6mrJ5e26oRXNcg=="
+#define PUBLIC_GROUP_PSK                  "izOH6cXN6mrJ5e26oRXNcg=="
 
 // these are _pushed_ to client app at any time
-#define PUSH_CODE_ADVERT                0x80
-#define PUSH_CODE_PATH_UPDATED          0x81
-#define PUSH_CODE_SEND_CONFIRMED        0x82
-#define PUSH_CODE_MSG_WAITING           0x83
-#define PUSH_CODE_RAW_DATA              0x84
-#define PUSH_CODE_LOGIN_SUCCESS         0x85
-#define PUSH_CODE_LOGIN_FAIL            0x86
-#define PUSH_CODE_STATUS_RESPONSE       0x87
-#define PUSH_CODE_LOG_RX_DATA           0x88
-#define PUSH_CODE_TRACE_DATA            0x89
-#define PUSH_CODE_NEW_ADVERT            0x8A
-#define PUSH_CODE_TELEMETRY_RESPONSE    0x8B
-#define PUSH_CODE_BINARY_RESPONSE       0x8C
+#define PUSH_CODE_ADVERT                  0x80
+#define PUSH_CODE_PATH_UPDATED            0x81
+#define PUSH_CODE_SEND_CONFIRMED          0x82
+#define PUSH_CODE_MSG_WAITING             0x83
+#define PUSH_CODE_RAW_DATA                0x84
+#define PUSH_CODE_LOGIN_SUCCESS           0x85
+#define PUSH_CODE_LOGIN_FAIL              0x86
+#define PUSH_CODE_STATUS_RESPONSE         0x87
+#define PUSH_CODE_LOG_RX_DATA             0x88
+#define PUSH_CODE_TRACE_DATA              0x89
+#define PUSH_CODE_NEW_ADVERT              0x8A
+#define PUSH_CODE_TELEMETRY_RESPONSE      0x8B
+#define PUSH_CODE_BINARY_RESPONSE         0x8C
 #define PUSH_CODE_PATH_DISCOVERY_RESPONSE 0x8D
-#define PUSH_CODE_CONTROL_DATA          0x8E   // v8+
+#define PUSH_CODE_CONTROL_DATA            0x8E // v8+
 
-#define ERR_CODE_UNSUPPORTED_CMD        1
-#define ERR_CODE_NOT_FOUND              2
-#define ERR_CODE_TABLE_FULL             3
-#define ERR_CODE_BAD_STATE              4
-#define ERR_CODE_FILE_IO_ERROR          5
-#define ERR_CODE_ILLEGAL_ARG            6
+#define ERR_CODE_UNSUPPORTED_CMD          1
+#define ERR_CODE_NOT_FOUND                2
+#define ERR_CODE_TABLE_FULL               3
+#define ERR_CODE_BAD_STATE                4
+#define ERR_CODE_FILE_IO_ERROR            5
+#define ERR_CODE_ILLEGAL_ARG              6
 
-#define MAX_SIGN_DATA_LEN               (8 * 1024) // 8K
+#define MAX_SIGN_DATA_LEN                 (8 * 1024) // 8K
 
 void MyMesh::writeOKFrame() {
   uint8_t buf[1];
@@ -155,7 +155,7 @@ void MyMesh::writeContactRespFrame(uint8_t code, const ContactInfo &contact) {
   _serial->writeFrame(out_frame, i);
 }
 
-void MyMesh::updateContactFromFrame(ContactInfo &contact, uint32_t& last_mod, const uint8_t *frame, int len) {
+void MyMesh::updateContactFromFrame(ContactInfo &contact, uint32_t &last_mod, const uint8_t *frame, int len) {
   int i = 0;
   uint8_t code = frame[i++]; // eg. CMD_ADD_UPDATE_CONTACT
   memcpy(contact.id.pub_key, &frame[i], PUB_KEY_SIZE);
@@ -256,7 +256,7 @@ bool MyMesh::isAutoAddEnabled() const {
   return (_prefs.manual_add_contacts & 1) == 0;
 }
 
-void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path_len, const uint8_t* path) {
+void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path_len, const uint8_t *path) {
   if (_serial->isConnected()) {
     if (!isAutoAddEnabled() && is_new) {
       writeContactRespFrame(PUSH_CODE_NEW_ADVERT, contact);
@@ -267,17 +267,17 @@ void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path
     }
   } else {
 #if defined(DISPLAY_CLASS) && !defined(HEADLESS_CANNED_MESSAGES)
-  if (_ui) _ui->notify(UIEventType::newContactMessage);
+    if (_ui) _ui->notify(UIEventType::newContactMessage);
 #endif
   }
 
   // add inbound-path to mem cache
-  if (path && path_len <= sizeof(AdvertPath::path)) {  // check path is valid
-    AdvertPath* p = advert_paths;
+  if (path && path_len <= sizeof(AdvertPath::path)) { // check path is valid
+    AdvertPath *p = advert_paths;
     uint32_t oldest = 0xFFFFFFFF;
-    for (int i = 0; i < ADVERT_PATH_TABLE_SIZE; i++) {   // check if already in table, otherwise evict oldest
+    for (int i = 0; i < ADVERT_PATH_TABLE_SIZE; i++) { // check if already in table, otherwise evict oldest
       if (memcmp(advert_paths[i].pubkey_prefix, contact.id.pub_key, sizeof(AdvertPath::pubkey_prefix)) == 0) {
-        p = &advert_paths[i];   // found
+        p = &advert_paths[i]; // found
         break;
       }
       if (advert_paths[i].recv_timestamp < oldest) {
@@ -297,7 +297,7 @@ void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path
 }
 
 static int sort_by_recent(const void *a, const void *b) {
-  return ((AdvertPath *) b)->recv_timestamp - ((AdvertPath *) a)->recv_timestamp;
+  return ((AdvertPath *)b)->recv_timestamp - ((AdvertPath *)a)->recv_timestamp;
 }
 
 int MyMesh::getRecentlyHeard(AdvertPath dest[], int max_num) {
@@ -318,7 +318,7 @@ void MyMesh::onContactPathUpdated(const ContactInfo &contact) {
   dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
 }
 
-ContactInfo*  MyMesh::processAck(const uint8_t *data) {
+ContactInfo *MyMesh::processAck(const uint8_t *data) {
   // see if matches any in a table
   for (int i = 0; i < EXPECTED_ACK_TABLE_SIZE; i++) {
     if (memcmp(data, &expected_ack_table[i].ack, 4) == 0) { // got an ACK from recipient
@@ -390,10 +390,12 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
 #endif
 }
 
-void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint32_t timestamp, const char* text, int8_t snr_quarter, const char* display_name, uint8_t txt_type) {
+void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint32_t timestamp,
+                                     const char *text, int8_t snr_quarter, const char *display_name,
+                                     uint8_t txt_type) {
   if (!text) return;
 
-  const char* payload = text;
+  const char *payload = text;
   char composed[320];
   if (display_name && *display_name) {
     size_t name_len = strlen(display_name);
@@ -433,11 +435,11 @@ void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint
   addToOfflineQueue(out_frame, i);
 
   if (_serial->isConnected()) {
-    uint8_t frame[1] = {PUSH_CODE_MSG_WAITING};
+    uint8_t frame[1] = { PUSH_CODE_MSG_WAITING };
     _serial->writeFrame(frame, 1);
   } else {
 #if defined(DISPLAY_CLASS) && !defined(HEADLESS_CANNED_MESSAGES)
-  if (_ui) _ui->notify(UIEventType::channelMessage);
+    if (_ui) _ui->notify(UIEventType::channelMessage);
 #endif
   }
 
@@ -453,14 +455,15 @@ void MyMesh::emitChannelMessageToApp(uint8_t channel_idx, uint8_t path_len, uint
 #endif
 }
 
-void MyMesh::logLocalChannelMessage(uint8_t channel_idx, const char* text) {
+void MyMesh::logLocalChannelMessage(uint8_t channel_idx, const char *text) {
   if (!text) return;
   // Use path_len 0 to indicate a local-origin message so the app can treat it as outbound.
-  emitChannelMessageToApp(channel_idx, 0, getRTCClock()->getCurrentTimeUnique(), text, 0, _prefs.node_name, TXT_TYPE_PLAIN);
+  emitChannelMessageToApp(channel_idx, 0, getRTCClock()->getCurrentTimeUnique(), text, 0, _prefs.node_name,
+                          TXT_TYPE_PLAIN);
 }
 
 #ifdef HEADLESS_CANNED_MESSAGES
-static inline const char* skipWhitespace(const char* ptr);
+static inline const char *skipWhitespace(const char *ptr);
 static inline bool isNotifyDelimiter(char c) {
   return c == 0 || isspace((unsigned char)c) || c == ',' || c == ';' || c == '|' || c == '\\' || c == '/';
 }
@@ -470,14 +473,14 @@ static inline bool isSpaceLike(unsigned char c) {
   return isspace(c) || c == 0xA0 || c == 0xC2;
 }
 
-static const char* trimLeft(const char* ptr) {
+static const char *trimLeft(const char *ptr) {
   while (ptr && *ptr && isSpaceLike((unsigned char)*ptr)) {
     ++ptr;
   }
   return ptr;
 }
 
-static bool matchesToken(const char* text, const char* token) {
+static bool matchesToken(const char *text, const char *token) {
   size_t i = 0;
   while (token[i] && text[i]) {
     if (tolower((unsigned char)text[i]) != tolower((unsigned char)token[i])) {
@@ -489,11 +492,11 @@ static bool matchesToken(const char* text, const char* token) {
   return text[i] == 0 || isspace((unsigned char)text[i]);
 }
 
-static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& truncated) {
+static size_t copyTrimmed(const char *src, char *dest, size_t dest_size, bool &truncated) {
   truncated = false;
   if (dest_size == 0) return 0;
-  const char* start = trimLeft(src);
-  const char* end = start + strlen(start);
+  const char *start = trimLeft(src);
+  const char *end = start + strlen(start);
   while (end > start && isSpaceLike((unsigned char)*(end - 1))) {
     --end;
   }
@@ -510,53 +513,90 @@ static size_t copyTrimmed(const char* src, char* dest, size_t dest_size, bool& t
   return actual_len;
 }
 
-static uint8_t* ringtoneScratch() {
+static uint8_t *ringtoneScratch() {
   static uint8_t blob[ringtone_cfg::kBlobMaxLen];
   return blob;
 }
 } // namespace
 
 // Standard Morse: mapping to '.' (dot) and '-' (dash)
-static const char* getMorseCode(char c) {
+static const char *getMorseCode(char c) {
   c = toupper((unsigned char)c);
   switch (c) {
-    case 'A': return ".-";
-    case 'B': return "-...";
-    case 'C': return "-.-.";
-    case 'D': return "-..";
-    case 'E': return ".";
-    case 'F': return "..-.";
-    case 'G': return "--.";
-    case 'H': return "....";
-    case 'I': return "..";
-    case 'J': return ".---";
-    case 'K': return "-.-";
-    case 'L': return ".-..";
-    case 'M': return "--";
-    case 'N': return "-.";
-    case 'O': return "---";
-    case 'P': return ".--.";
-    case 'Q': return "--.-";
-    case 'R': return ".-.";
-    case 'S': return "...";
-    case 'T': return "-";
-    case 'U': return "..-";
-    case 'V': return "...-";
-    case 'W': return ".--";
-    case 'X': return "-..-";
-    case 'Y': return "-.--";
-    case 'Z': return "--..";
-    case '0': return "-----";
-    case '1': return ".----";
-    case '2': return "..---";
-    case '3': return "...--";
-    case '4': return "....-";
-    case '5': return ".....";
-    case '6': return "-....";
-    case '7': return "--...";
-    case '8': return "---..";
-    case '9': return "----.";
-    default: return NULL;
+  case 'A':
+    return ".-";
+  case 'B':
+    return "-...";
+  case 'C':
+    return "-.-.";
+  case 'D':
+    return "-..";
+  case 'E':
+    return ".";
+  case 'F':
+    return "..-.";
+  case 'G':
+    return "--.";
+  case 'H':
+    return "....";
+  case 'I':
+    return "..";
+  case 'J':
+    return ".---";
+  case 'K':
+    return "-.-";
+  case 'L':
+    return ".-..";
+  case 'M':
+    return "--";
+  case 'N':
+    return "-.";
+  case 'O':
+    return "---";
+  case 'P':
+    return ".--.";
+  case 'Q':
+    return "--.-";
+  case 'R':
+    return ".-.";
+  case 'S':
+    return "...";
+  case 'T':
+    return "-";
+  case 'U':
+    return "..-";
+  case 'V':
+    return "...-";
+  case 'W':
+    return ".--";
+  case 'X':
+    return "-..-";
+  case 'Y':
+    return "-.--";
+  case 'Z':
+    return "--..";
+  case '0':
+    return "-----";
+  case '1':
+    return ".----";
+  case '2':
+    return "..---";
+  case '3':
+    return "...--";
+  case '4':
+    return "....-";
+  case '5':
+    return ".....";
+  case '6':
+    return "-....";
+  case '7':
+    return "--...";
+  case '8':
+    return "---..";
+  case '9':
+    return "----.";
+  default:
+    return NULL;
   }
 }
 
@@ -564,11 +604,11 @@ static const char* getMorseCode(char c) {
 // Returns true if at least one dot/dash was emitted
 // dot  = 1 unit beep, dash ≈ 4 units (slightly longer for clarity)
 // intra-element gap = 1 unit silence, inter-letter gap ≈ 3 units, word gap ≈ 7 units
-static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len) {
+static bool buildMorseRtttl(const char *message, char *rtttl_out, size_t max_len) {
   if (!message || !rtttl_out || max_len == 0) return false;
 
   size_t pos = 0;
-  const char* header = "CW:d=8,o=5,b=480:";
+  const char *header = "CW:d=8,o=5,b=480:";
   size_t hdr_len = strlen(header);
   if (hdr_len >= max_len) {
     rtttl_out[0] = 0;
@@ -603,7 +643,7 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
       continue;
     }
 
-    const char* code = getMorseCode(ch);
+    const char *code = getMorseCode(ch);
     if (!code) {
       continue; // skip unsupported chars
     }
@@ -652,16 +692,15 @@ static bool buildMorseRtttl(const char* message, char* rtttl_out, size_t max_len
   } else {
     rtttl_out[max_len - 1] = 0;
   }
-  Serial.printf("[CW] build msgLen=%u rtttlLen=%u\n", (unsigned)strlen(message), (unsigned)strlen(rtttl_out));
   return emitted;
 }
 
 // Compute a lightweight hash of text content for notification dedupe (ignores routing/path changes).
-static bool computeTextHash(const char* text, uint8_t out_hash[MAX_HASH_SIZE]) {
+static bool computeTextHash(const char *text, uint8_t out_hash[MAX_HASH_SIZE]) {
   if (!text || !out_hash) return false;
   // 32-bit FNV-1a then expand to 16 bytes by repetition
   uint32_t h = 2166136261u;
-  for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
+  for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
     h ^= *p;
     h *= 16777619u;
   }
@@ -672,7 +711,7 @@ static bool computeTextHash(const char* text, uint8_t out_hash[MAX_HASH_SIZE]) {
 }
 
 // For CW, truncate overly long RTTTL to reduce overrun; ensure trailing null.
-static void clampRtttl(char* buf, size_t max_len) {
+static void clampRtttl(char *buf, size_t max_len) {
   if (!buf || max_len == 0) return;
   size_t len = strlen(buf);
   if (len >= max_len) {
@@ -680,11 +719,11 @@ static void clampRtttl(char* buf, size_t max_len) {
   }
 }
 
-static uint16_t countRtttlTokens(const char* s) {
+static uint16_t countRtttlTokens(const char *s) {
   if (!s) return 0;
   uint16_t cnt = 0;
   bool in_token = false;
-  for (const char* p = s; *p; ++p) {
+  for (const char *p = s; *p; ++p) {
     if (*p == ',') {
       if (in_token) ++cnt;
       in_token = false;
@@ -696,7 +735,7 @@ static uint16_t countRtttlTokens(const char* s) {
   return cnt;
 }
 
-void MyMesh::sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text) {
+void MyMesh::sendLocalChannelSystemMessage(uint8_t channel_idx, const char *text) {
   if (text == NULL) return;
   logLocalChannelMessage(channel_idx, text);
 }
@@ -723,7 +762,7 @@ void MyMesh::loadTapTargetPrefs() {
   }
 
   if (_tapTarget.type == static_cast<uint8_t>(TapTargetType::Contact)) {
-    ContactInfo* found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
+    ContactInfo *found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
     if (found) {
       StrHelper::strzcpy(_tapTarget.name, found->name, sizeof(_tapTarget.name));
       return;
@@ -742,7 +781,7 @@ void MyMesh::loadTapTargetPrefs() {
   persistTapTargetPrefs();
 }
 
-void MyMesh::setTapTargetChannel(uint8_t channel_idx, const ChannelDetails& channel) {
+void MyMesh::setTapTargetChannel(uint8_t channel_idx, const ChannelDetails &channel) {
   _tapTarget.version = TapTargetPrefs::kVersion;
   _tapTarget.type = static_cast<uint8_t>(TapTargetType::Channel);
   _tapTarget.channel_idx = channel_idx;
@@ -751,7 +790,7 @@ void MyMesh::setTapTargetChannel(uint8_t channel_idx, const ChannelDetails& chan
   persistTapTargetPrefs();
 }
 
-void MyMesh::setTapTargetContact(const ContactInfo& contact) {
+void MyMesh::setTapTargetContact(const ContactInfo &contact) {
   _tapTarget.version = TapTargetPrefs::kVersion;
   _tapTarget.type = static_cast<uint8_t>(TapTargetType::Contact);
   _tapTarget.channel_idx = 0;
@@ -760,23 +799,24 @@ void MyMesh::setTapTargetContact(const ContactInfo& contact) {
   persistTapTargetPrefs();
 }
 
-void MyMesh::sendTapStatusToApp(int channel_idx, const char* message) {
+void MyMesh::sendTapStatusToApp(int channel_idx, const char *message) {
   if (!message || !*message) return;
   if (channel_idx >= 0) {
     sendLocalChannelSystemMessage((uint8_t)channel_idx, message);
   } else {
-    emitChannelMessageToApp(0, 0, getRTCClock()->getCurrentTimeUnique(), message, 0, "System", TXT_TYPE_CLI_DATA);
+    emitChannelMessageToApp(0, 0, getRTCClock()->getCurrentTimeUnique(), message, 0, "System",
+                            TXT_TYPE_CLI_DATA);
   }
 }
 
-bool MyMesh::handleTapCommandForContact(const ContactInfo& contact, const char* text) {
+bool MyMesh::handleTapCommandForContact(const ContactInfo &contact, const char *text) {
   if (!text) return false;
-  const char* cmd = trimLeft(text);
+  const char *cmd = trimLeft(text);
   if (strncmp(cmd, "/tap", 4) != 0) {
     return false;
   }
 
-  const char* args = trimLeft(cmd + 4);
+  const char *args = trimLeft(cmd + 4);
   if (*args && matchesToken(args, "here")) {
     setTapTargetContact(contact);
   }
@@ -787,9 +827,9 @@ bool MyMesh::handleTapCommandForContact(const ContactInfo& contact, const char* 
   return true;
 }
 
-bool MyMesh::resolveTapTarget(TapTargetState& out) {
+bool MyMesh::resolveTapTarget(TapTargetState &out) {
   if (_tapTarget.type == static_cast<uint8_t>(TapTargetType::Contact)) {
-    ContactInfo* found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
+    ContactInfo *found = lookupContactByPubKey(_tapTarget.contact_pub_key, PUB_KEY_SIZE);
     if (found) {
       out.type = TapTargetType::Contact;
       out.contact = *found;
@@ -829,36 +869,36 @@ bool MyMesh::resolveTapTarget(TapTargetState& out) {
   return true;
 }
 
-void MyMesh::describeTapTarget(char* dest, size_t len) const {
+void MyMesh::describeTapTarget(char *dest, size_t len) const {
   if (!dest || len == 0) return;
   TapTargetState state;
-  MyMesh* self = const_cast<MyMesh*>(this);
+  MyMesh *self = const_cast<MyMesh *>(this);
   if (self->resolveTapTarget(state)) {
-    const char* name = (state.type == TapTargetType::Channel) ? state.channel.name : state.contact.name;
-    const char* kind = (state.type == TapTargetType::Channel) ? "channel" : "device";
+    const char *name = (state.type == TapTargetType::Channel) ? state.channel.name : state.contact.name;
+    const char *kind = (state.type == TapTargetType::Channel) ? "channel" : "device";
     snprintf(dest, len, "Tap target: %s (%s)", (name && *name) ? name : "Unknown", kind);
   } else {
     snprintf(dest, len, "Tap target: unavailable");
   }
 }
 
-const char* MyMesh::describeNotifyMode(uint8_t mode) const {
+const char *MyMesh::describeNotifyMode(uint8_t mode) const {
   switch (mode) {
-    case NOTIFY_MODE_CW:
-      return "cw";
-    case NOTIFY_MODE_OFF:
-      return "off";
-    case NOTIFY_MODE_RTTTL:
-    default:
-      return "rtttl";
+  case NOTIFY_MODE_CW:
+    return "cw";
+  case NOTIFY_MODE_OFF:
+    return "off";
+  case NOTIFY_MODE_RTTTL:
+  default:
+    return "rtttl";
   }
 }
 
-bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char* text) {
+bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char *text) {
   if (!text || strncmp(text, "/play", 5) != 0) {
     return false;
   }
-  const char* args = text + 5;
+  const char *args = text + 5;
   args = skipWhitespace(args);
 
   if (*args == 0) {
@@ -876,26 +916,27 @@ bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char* text) {
   return true;
 }
 
-bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
+bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char *text) {
   if (!text || strncmp(text, "/buz", 4) != 0) {
     return false;
   }
 
-  const char* args = text + 4;
+  const char *args = text + 4;
   args = skipWhitespace(args);
 
   // Space-delimited: no '=' or '?' handling. Empty -> query.
 
   if (*args == 0) {
     char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
+             describeNotifyMode(_prefs.notify_mode));
     sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
 
   // Robust parse: look for first ASCII letter and decide by it.
   char first_letter = 0;
-  const char* p = args;
+  const char *p = args;
   while (*p) {
     unsigned char ch = (unsigned char)*p;
     if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
@@ -907,7 +948,8 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
 
   if (!first_letter) {
     char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
+             describeNotifyMode(_prefs.notify_mode));
     sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
@@ -921,7 +963,8 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
     new_mode = NOTIFY_MODE_OFF;
   } else {
     char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off", describeNotifyMode(_prefs.notify_mode));
+    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
+             describeNotifyMode(_prefs.notify_mode));
     sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
@@ -945,15 +988,132 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char* text) {
   sendLocalChannelSystemMessage(channel_idx, response);
   return true;
 }
+
+bool MyMesh::handleLocalFlipmuteCommand(uint8_t channel_idx, const char *text) {
+  if (!text || strncmp(text, "/flipmute", 9) != 0) {
+    return false;
+  }
+
+  const char *args = text + 9;
+  args = skipWhitespace(args);
+
+  // Space-delimited: empty -> query.
+  if (*args == 0) {
+    char response[96];
+    snprintf(response, sizeof(response), "Flip to mute: %s\nUsage: /flipmute on|off",
+             _prefs.flipmute_enabled ? "enabled" : "disabled");
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  // Robust parse: look for first ASCII letter and decide by it.
+  char first_letter = 0;
+  const char *p = args;
+  while (*p) {
+    unsigned char ch = (unsigned char)*p;
+    if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+      first_letter = (char)tolower(ch);
+      break;
+    }
+    ++p;
+  }
+
+  if (!first_letter) {
+    char response[96];
+    snprintf(response, sizeof(response), "Flip to mute: %s\nUsage: /flipmute on|off",
+             _prefs.flipmute_enabled ? "enabled" : "disabled");
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  uint8_t new_state = _prefs.flipmute_enabled;
+  if (first_letter == 'o') {
+    // Could be 'on' or 'off', check second letter
+    if (args[0] == 'o' && args[1] == 'n') {
+      new_state = 1;
+    } else if (args[0] == 'o' && args[1] == 'f') {
+      new_state = 0;
+    } else {
+      new_state = (first_letter == 'o' && args[0] == 'n') ? 1 : 0;
+    }
+  } else if (first_letter == 'e') {
+    new_state = 1; // enable
+  } else if (first_letter == 'd') {
+    new_state = 0; // disable
+  } else if (first_letter == 'y') {
+    new_state = 1; // yes
+  } else if (first_letter == 'n') {
+    new_state = 0; // no
+  } else {
+    char response[96];
+    snprintf(response, sizeof(response), "Flip to mute: %s\nUsage: /flipmute on|off",
+             _prefs.flipmute_enabled ? "enabled" : "disabled");
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  if (new_state == _prefs.flipmute_enabled) {
+    char response[96];
+    snprintf(response, sizeof(response), "Flip-mute already %s", new_state ? "enabled" : "disabled");
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  _prefs.flipmute_enabled = new_state;
+  savePrefs();
+
+  Serial.printf("[FlipMute] Setting saved: flipmute_enabled=%d\n", _prefs.flipmute_enabled);
+
+  char response[96];
+  snprintf(response, sizeof(response), "Flip-mute %s", new_state ? "enabled" : "disabled");
+  sendLocalChannelSystemMessage(channel_idx, response);
+  return true;
+}
+
+bool MyMesh::handleLocalSensorCommand(uint8_t channel_idx, const char *text) {
+  if (!text || strncmp(text, "/sensor", 7) != 0) {
+    return false;
+  }
+
+  char response[256];
+  int offset = 0;
+
+// Get light sensor data (only on T1000-E)
+#ifdef T1000_E
+  extern uint32_t t1000e_get_light(void);
+  extern bool t1000e_read_accel(int8_t &x, int8_t &y, int8_t &z);
+
+  // Single read: light and accel data
+  uint32_t light = t1000e_get_light();
+  int8_t x, y, z;
+  bool accel_ok = t1000e_read_accel(x, y, z);
+
+  offset += snprintf(&response[offset], sizeof(response) - offset, "Light:%lu lux | ", light);
+
+  if (accel_ok) {
+    offset += snprintf(&response[offset], sizeof(response) - offset, "Accel X=%d Y=%d Z=%d", (int)x, (int)y,
+                       (int)z);
+  } else {
+    offset += snprintf(&response[offset], sizeof(response) - offset, "Accel:error");
+  }
+#else
+  snprintf(response, sizeof(response), "Sensors not available on this device");
 #endif
 
-bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
-  // REVISIT: try to determine which Region (from transport_codes[1]) that Sender is indicating for replies/responses
+  sendLocalChannelSystemMessage(channel_idx, response);
+  return true;
+}
+
+#endif
+
+bool MyMesh::filterRecvFloodPacket(mesh::Packet *packet) {
+  // REVISIT: try to determine which Region (from transport_codes[1]) that Sender is indicating for
+  // replies/responses
   //    if unknown, fallback to finding Region from transport_codes[0], the 'scope' used by Sender
   return false;
 }
 
-bool MyMesh::computePacketHash(const mesh::Packet* pkt, uint8_t out_hash[MAX_HASH_SIZE]) const {
+bool MyMesh::computePacketHash(const mesh::Packet *pkt, uint8_t out_hash[MAX_HASH_SIZE]) const {
   if (!pkt || !out_hash) return false;
   pkt->calculatePacketHash(out_hash);
   return true;
@@ -1020,25 +1180,25 @@ bool MyMesh::shouldNotifyForPacket(const uint8_t hash[MAX_HASH_SIZE]) {
   return true;
 }
 
-void MyMesh::sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis) {
+void MyMesh::sendFloodScoped(const ContactInfo &recipient, mesh::Packet *pkt, uint32_t delay_millis) {
   // TODO: dynamic send_scope, depending on recipient and current 'home' Region
   if (send_scope.isNull()) {
     sendFlood(pkt, delay_millis);
   } else {
     uint16_t codes[2];
     codes[0] = send_scope.calcTransportCode(pkt);
-    codes[1] = 0;  // REVISIT: set to 'home' Region, for sender/return region?
+    codes[1] = 0; // REVISIT: set to 'home' Region, for sender/return region?
     sendFlood(pkt, codes, delay_millis);
   }
 }
-void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis) {
+void MyMesh::sendFloodScoped(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t delay_millis) {
   // TODO: have per-channel send_scope
   if (send_scope.isNull()) {
     sendFlood(pkt, delay_millis);
   } else {
     uint16_t codes[2];
     codes[0] = send_scope.calcTransportCode(pkt);
-    codes[1] = 0;  // REVISIT: set to 'home' Region, for sender/return region?
+    codes[1] = 0; // REVISIT: set to 'home' Region, for sender/return region?
     sendFlood(pkt, codes, delay_millis);
   }
 }
@@ -1082,8 +1242,8 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   // Drop duplicates before we decide about ringing to avoid interrupting ongoing CW.
   bool dup_group = isDuplicateGroupMessage(pkt_hash);
   if (dup_group) {
-    Serial.printf("[CHAN] drop duplicate group hash=%02X%02X%02X%02X\n", pkt_hash[0], pkt_hash[1], pkt_hash[2],
-                  pkt_hash[3]);
+    Serial.printf("[CHAN] drop duplicate group hash=%02X%02X%02X%02X\n", pkt_hash[0], pkt_hash[1],
+                  pkt_hash[2], pkt_hash[3]);
     return; // ignore forwarded duplicates by packet hash
   }
 
@@ -1097,7 +1257,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
   // Decide whether to ring once for this hash.
   bool should_ring = false;
   uint8_t notify_hash[MAX_HASH_SIZE];
-  const uint8_t* ring_hash = pkt_hash;
+  const uint8_t *ring_hash = pkt_hash;
   if (_prefs.notify_mode == NOTIFY_MODE_CW) {
     if (computeTextHash(text, notify_hash)) {
       ring_hash = notify_hash; // dedupe by content so forwarded copies share hash
@@ -1119,8 +1279,8 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
       memcpy(_last_cw_group_hash, ring_hash, MAX_HASH_SIZE);
     }
   } else if (_prefs.notify_mode != NOTIFY_MODE_CW) {
-    Serial.printf("[CHAN] no-ring mode%u hash=%02X%02X%02X%02X\n", _prefs.notify_mode, pkt_hash[0], pkt_hash[1],
-                  pkt_hash[2], pkt_hash[3]);
+    Serial.printf("[CHAN] no-ring mode%u hash=%02X%02X%02X%02X\n", _prefs.notify_mode, pkt_hash[0],
+                  pkt_hash[1], pkt_hash[2], pkt_hash[3]);
   }
   int channel_idx_int = findChannelIdx(channel);
   uint8_t channel_idx = channel_idx_int < 0 ? 0xFF : (uint8_t)channel_idx_int;
@@ -1153,7 +1313,8 @@ uint8_t MyMesh::onContactRequest(const ContactInfo &contact, uint32_t sender_tim
       permissions |= cp & TELEM_PERM_ENVIRONMENT;
     }
 
-    uint8_t perm_mask = ~(data[1]);    // NEW: first reserved byte (of 4), is now inverse mask to apply to permissions
+    uint8_t perm_mask =
+        ~(data[1]); // NEW: first reserved byte (of 4), is now inverse mask to apply to permissions
     permissions &= perm_mask;
 
     if (permissions & TELEM_PERM_BASE) { // only respond if base permission bit is set
@@ -1197,8 +1358,8 @@ void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, 
       memcpy(&out_frame[i], contact.id.pub_key, 6);
       i += 6; // pub_key_prefix
       memcpy(&out_frame[i], &tag, 4);
-      i += 4; // NEW: include server timestamp
-      out_frame[i++] = data[7]; // NEW (v7): ACL permissions
+      i += 4;                    // NEW: include server timestamp
+      out_frame[i++] = data[7];  // NEW (v7): ACL permissions
       out_frame[i++] = data[12]; // FIRMWARE_VER_LEVEL
     } else {
       out_frame[i++] = PUSH_CODE_LOGIN_FAIL;
@@ -1222,7 +1383,7 @@ void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, 
     memcpy(&out_frame[i], &data[4], len - 4);
     i += (len - 4);
     _serial->writeFrame(out_frame, i);
-  } else if (len > 4 && tag == pending_telemetry) {  // check for matching response tag
+  } else if (len > 4 && tag == pending_telemetry) { // check for matching response tag
     pending_telemetry = 0;
 
     int i = 0;
@@ -1233,13 +1394,13 @@ void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, 
     memcpy(&out_frame[i], &data[4], len - 4);
     i += (len - 4);
     _serial->writeFrame(out_frame, i);
-  } else if (len > 4 && tag == pending_req) {  // check for matching response tag
+  } else if (len > 4 && tag == pending_req) { // check for matching response tag
     pending_req = 0;
 
     int i = 0;
     out_frame[i++] = PUSH_CODE_BINARY_RESPONSE;
-    out_frame[i++] = 0; // reserved
-    memcpy(&out_frame[i], &tag, 4);   // app needs to match this to RESP_CODE_SENT.tag
+    out_frame[i++] = 0;             // reserved
+    memcpy(&out_frame[i], &tag, 4); // app needs to match this to RESP_CODE_SENT.tag
     i += 4;
     memcpy(&out_frame[i], &data[4], len - 4);
     i += (len - 4);
@@ -1247,12 +1408,13 @@ void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, 
   }
 }
 
-bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t in_path_len, uint8_t* out_path, uint8_t out_path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) {
+bool MyMesh::onContactPathRecv(ContactInfo &contact, uint8_t *in_path, uint8_t in_path_len, uint8_t *out_path,
+                               uint8_t out_path_len, uint8_t extra_type, uint8_t *extra, uint8_t extra_len) {
   if (extra_type == PAYLOAD_TYPE_RESPONSE && extra_len > 4) {
     uint32_t tag;
     memcpy(&tag, extra, 4);
 
-    if (tag == pending_discovery) {  // check for matching response tag)
+    if (tag == pending_discovery) { // check for matching response tag)
       pending_discovery = 0;
 
       if (in_path_len > MAX_PATH_SIZE || out_path_len > MAX_PATH_SIZE) {
@@ -1273,11 +1435,12 @@ bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t i
 
         _serial->writeFrame(out_frame, i);
       }
-      return false;  // DON'T send reciprocal path!
+      return false; // DON'T send reciprocal path!
     }
   }
   // let base class handle received path and data
-  return BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len, out_path, out_path_len, extra_type, extra, extra_len);
+  return BaseChatMesh::onContactPathRecv(contact, in_path, in_path_len, out_path, out_path_len, extra_type,
+                                         extra, extra_len);
 }
 
 void MyMesh::onControlDataRecv(mesh::Packet *packet) {
@@ -1338,18 +1501,18 @@ void MyMesh::persistHeadlessCannedMessages() {
   _store->saveCannedMessages(_cannedMessages, _cannedMessageCount);
 }
 
-static inline const char* skipWhitespace(const char* ptr) {
+static inline const char *skipWhitespace(const char *ptr) {
   while (ptr && *ptr && isspace((unsigned char)*ptr)) {
     ++ptr;
   }
   return ptr;
 }
 
-bool MyMesh::parseCannedMessageList(const char* input, char dest[][canned::kMaxMessageLen], size_t& count) {
+bool MyMesh::parseCannedMessageList(const char *input, char dest[][canned::kMaxMessageLen], size_t &count) {
   count = 0;
   if (!input) return false;
 
-  const char* cursor = input;
+  const char *cursor = input;
   cursor = skipWhitespace(cursor);
   while (*cursor && count < canned::kMaxMessages) {
     if (*cursor == '|') {
@@ -1357,11 +1520,11 @@ bool MyMesh::parseCannedMessageList(const char* input, char dest[][canned::kMaxM
       continue;
     }
 
-    const char* start = cursor;
+    const char *start = cursor;
     while (*cursor && *cursor != '|') {
       ++cursor;
     }
-    const char* end = cursor;
+    const char *end = cursor;
     while (end > start && isspace((unsigned char)*(end - 1))) {
       --end;
     }
@@ -1397,43 +1560,34 @@ void MyMesh::summarizeCannedMessages(uint8_t channel_idx) {
     pos += msg_len;
   }
   summary[pos] = 0;
-  emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), summary, 0, "System", TXT_TYPE_CLI_DATA);
+  emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), summary, 0, "System",
+                          TXT_TYPE_CLI_DATA);
 }
 
 // Local command registry for easier management/dumping.
-enum class LocalCommand : uint8_t {
-  Msg = 0,
-  Buz,
-  Ringtone,
-  Play,
-  Tap,
-  Help,
-  Count
+enum class LocalCommand : uint8_t { Msg = 0, Buz, Ringtone, Play, Tap, Help, Count };
+
+static constexpr const char *kLocalCommandNames[] = {
+  "/msg", "/buz", "/ringtone", "/play", "/tap", "/help",
 };
 
-static constexpr const char* kLocalCommandNames[] = {
-  "/msg",
-  "/buz",
-  "/ringtone",
-  "/play",
-  "/tap",
-  "/help",
-};
-
-static_assert(static_cast<size_t>(LocalCommand::Count) == (sizeof(kLocalCommandNames) / sizeof(kLocalCommandNames[0])),
+static_assert(static_cast<size_t>(LocalCommand::Count) ==
+                  (sizeof(kLocalCommandNames) / sizeof(kLocalCommandNames[0])),
               "LocalCommand enum and name table must stay in sync");
 
-bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, const ChannelDetails& channel) {
+bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, const ChannelDetails &channel) {
   (void)channel;
   if (text == NULL) return false;
   // Trim leading spaces so commands like "  /msg" still match, and allow trailing
   // spaces to be ignored by downstream parsers.
-  const char* cmd = skipWhitespace(text);
+  const char *cmd = skipWhitespace(text);
 #ifdef HEADLESS_CANNED_MESSAGES
   if (handleLocalBuzzerCommand(channel_idx, cmd)) return true;
+  if (handleLocalFlipmuteCommand(channel_idx, cmd)) return true;
+  if (handleLocalSensorCommand(channel_idx, cmd)) return true;
   if (handleLocalPlayCommand(channel_idx, cmd)) return true;
   if (strncmp(cmd, kLocalCommandNames[static_cast<size_t>(LocalCommand::Tap)], 4) == 0) {
-    const char* args = skipWhitespace(cmd + 4);
+    const char *args = skipWhitespace(cmd + 4);
     if (*args && matchesToken(args, "here")) {
       setTapTargetChannel(channel_idx, channel);
     }
@@ -1444,8 +1598,8 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
-    const char* help =
-      "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]\n/tap [here]";
+    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]\n/tap "
+                       "[here]\n\n/flipmute on|off";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
   }
@@ -1454,7 +1608,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   // Only handle /msg here; other prefixes are handled above.
   if (strncmp(cmd, kLocalCommandNames[static_cast<size_t>(LocalCommand::Msg)], 4) != 0) return false;
 
-  const char* args = cmd + 4;
+  const char *args = cmd + 4;
   // Treat any text starting with "/msg" as a command. If the next char isn't space
   // or terminator, return usage instead of sending as a normal message.
   if (*args && !isspace((unsigned char)*args)) {
@@ -1473,7 +1627,8 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
   char updated[canned::kMaxMessages][canned::kMaxMessageLen];
   size_t count = 0;
   if (!parseCannedMessageList(args, updated, count)) {
-      emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(), "/msg error: no entries", 0, "System", TXT_TYPE_CLI_DATA);
+    emitChannelMessageToApp(channel_idx, 0xFF, getRTCClock()->getCurrentTimeUnique(),
+                            "/msg error: no entries", 0, "System", TXT_TYPE_CLI_DATA);
     return true;
   }
 
@@ -1491,6 +1646,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char* text, co
 
 void MyMesh::clearAllRingtones() {
   _globalRingtone[0] = 0;
+  _ringtoneRepeatCount = 1; // Reset to default
   for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
     _deviceRingtones[i].in_use = false;
     memset(_deviceRingtones[i].pub_key, 0, sizeof(_deviceRingtones[i].pub_key));
@@ -1501,13 +1657,13 @@ void MyMesh::clearAllRingtones() {
 
 void MyMesh::loadHeadlessRingtones() {
   clearAllRingtones();
-  uint8_t* blob = ringtoneScratch();
+  uint8_t *blob = ringtoneScratch();
   const size_t scratch_len = ringtone_cfg::kBlobMaxLen;
   size_t len = 0;
   if (!_store->loadRingtoneBlob(blob, scratch_len, len) || len < 2) {
     return;
   }
-  const uint8_t* ptr = blob;
+  const uint8_t *ptr = blob;
   size_t remaining = len;
   uint8_t version = *ptr++;
   remaining--;
@@ -1562,7 +1718,7 @@ void MyMesh::loadHeadlessRingtones() {
 }
 
 void MyMesh::persistHeadlessRingtones() {
-  uint8_t* blob = ringtoneScratch();
+  uint8_t *blob = ringtoneScratch();
   const size_t scratch_len = ringtone_cfg::kBlobMaxLen;
   size_t pos = 0;
   blob[pos++] = ringtone_cfg::kBlobVersion;
@@ -1604,7 +1760,7 @@ void MyMesh::persistHeadlessRingtones() {
   _store->saveRingtoneBlob(blob, pos);
 }
 
-MyMesh::DeviceRingtone* MyMesh::findRingtoneEntry(const uint8_t* pub_key) {
+MyMesh::DeviceRingtone *MyMesh::findRingtoneEntry(const uint8_t *pub_key) {
   if (!pub_key) return NULL;
   for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
     if (_deviceRingtones[i].in_use && memcmp(_deviceRingtones[i].pub_key, pub_key, PUB_KEY_SIZE) == 0) {
@@ -1614,9 +1770,9 @@ MyMesh::DeviceRingtone* MyMesh::findRingtoneEntry(const uint8_t* pub_key) {
   return NULL;
 }
 
-MyMesh::DeviceRingtone* MyMesh::allocateRingtoneEntry(const uint8_t* pub_key) {
+MyMesh::DeviceRingtone *MyMesh::allocateRingtoneEntry(const uint8_t *pub_key) {
   if (!pub_key) return NULL;
-  DeviceRingtone* existing = findRingtoneEntry(pub_key);
+  DeviceRingtone *existing = findRingtoneEntry(pub_key);
   if (existing) return existing;
   for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
     if (!_deviceRingtones[i].in_use) {
@@ -1642,7 +1798,7 @@ MyMesh::DeviceRingtone* MyMesh::allocateRingtoneEntry(const uint8_t* pub_key) {
   return &_deviceRingtones[oldest_idx];
 }
 
-const char* MyMesh::getRingtoneFor(const ContactInfo* from) const {
+const char *MyMesh::getRingtoneFor(const ContactInfo *from) const {
   if (from) {
     for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
       if (_deviceRingtones[i].in_use && _deviceRingtones[i].tone[0] &&
@@ -1657,23 +1813,47 @@ const char* MyMesh::getRingtoneFor(const ContactInfo* from) const {
   return NULL;
 }
 
-void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
+void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text) {
   if (_ui == NULL) return;
   uint8_t mode = _prefs.notify_mode;
+#ifdef MESH_DEBUG
+  Serial.printf("[Ringtone] maybePlayRingtone called - mode=%d flipmute_enabled=%d\n", mode, _prefs.flipmute_enabled);
+#endif
   if (mode == NOTIFY_MODE_OFF) {
     return;
   }
 
+  // Check FlipMute: if enabled and device is face-down in dark, don't play sound
+  if (_prefs.flipmute_enabled) {
+#ifdef T1000_E
+    extern uint32_t t1000e_get_light(void);
+    extern bool t1000e_read_accel(int8_t &x, int8_t &y, int8_t &z);
+
+    uint32_t light = t1000e_get_light();
+
+    extern bool t1000e_is_face_down_in_dark(uint32_t light_threshold_lux);
+    if (t1000e_is_face_down_in_dark(5)) {
+#ifdef MESH_DEBUG
+      Serial.println("[FlipMute] Device face-down and dark in maybePlayRingtone, suppressing sound");
+#endif
+      return;
+    }
+#else
+    Serial.println("[Ringtone] T1000_E not defined, skipping FlipMute check");
+#endif
+  } else {
+    Serial.printf("[Ringtone] FlipMute is disabled (flipmute_enabled=%d)\n", _prefs.flipmute_enabled);
+  }
+
   if (mode == NOTIFY_MODE_CW) {
-    // CW 模式只根据消息内容生成摩尔斯；没有消息就不播。
     if (!text || !text[0]) return;
 
     // 如果消息是「设备名/ID: 内容」这种格式，去掉前面的前缀，只保留真正的内容。
-    const char* payload = text;
+    const char *payload = text;
     if (from && from->name[0]) {
       size_t name_len = strlen(from->name);
       if (strncmp(payload, from->name, name_len) == 0) {
-        const char* p = payload + name_len;
+        const char *p = payload + name_len;
         if (*p == ':' && p[1] == ' ') {
           payload = p + 2;
         } else if (*p == ':' || *p == ' ') {
@@ -1682,16 +1862,18 @@ void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
       }
     }
 
-    // 再防一手：如果开头直到第一个冒号之间没有空格，也当作 ID 前缀去掉。
     if (payload) {
-      const char* colon = strchr(payload, ':');
+      const char *colon = strchr(payload, ':');
       if (colon) {
         bool has_space = false;
-        for (const char* q = payload; q < colon; ++q) {
-          if (*q == ' ') { has_space = true; break; }
+        for (const char *q = payload; q < colon; ++q) {
+          if (*q == ' ') {
+            has_space = true;
+            break;
+          }
         }
         if (!has_space) {
-          const char* p = colon;
+          const char *p = colon;
           if (p[1] == ' ') {
             payload = p + 2;
           } else {
@@ -1709,7 +1891,7 @@ void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
     if (!has_morse) {
       // If the text cannot be converted to Morse (e.g. only non-ASCII chars),
       // still emit a short alert so DMs are not silent in CW mode.
-      const char* fallback = getRingtoneFor(from);
+      const char *fallback = getRingtoneFor(from);
       if (!fallback || !fallback[0]) {
         fallback = "d=8,o=5,b=400:4c,4p,4c"; // brief double beep fallback
       }
@@ -1717,18 +1899,81 @@ void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
       return;
     }
     clampRtttl(cwBuffer, sizeof(cwBuffer));
-    uint16_t tokens = countRtttlTokens(cwBuffer);
-    Serial.printf("[CW] play cw rtttlLen=%u tokens=%u payloadLen=%u text='%.40s'\n",
-                  (unsigned)strlen(cwBuffer), tokens, (unsigned)strlen(payload), payload);
-    // Print first ~120 chars for debugging
-    char preview[128];
-    StrHelper::strncpy(preview, cwBuffer, sizeof(preview));
-    Serial.printf("[CW] rtttl='%s'\n", preview);
     _ui->playRingtone(cwBuffer);
   } else {
-    const char* tone = getRingtoneFor(from);
+    // RTTTL mode: play ringtone with repeat count
+    const char *tone = getRingtoneFor(from);
     if (tone && tone[0]) {
-      _ui->playRingtone(tone);
+      // Extract repeat count from tone string if it ends with "xN"
+      uint8_t repeat = 1; // default
+      size_t tone_len = strlen(tone);
+
+      // Check for "xN" at the end (e.g., "...16c7x3" or "...16c7 x3")
+      if (tone_len >= 2) {
+        // Try "xN" without space (e.g., "16c7x3")
+        char x_char = tone[tone_len - 2];
+        char digit_char = tone[tone_len - 1];
+
+        if (x_char == 'x' && isdigit((unsigned char)digit_char)) {
+          int digit = digit_char - '0';
+          if (digit >= 1 && digit <= 9) {
+            repeat = (uint8_t)digit;
+          }
+        }
+      }
+
+      Serial.printf("[Ringtone] RTTTL playback with repeat count: %d (from tone='%s')\n", repeat, tone);
+
+      // Create a copy without the xN suffix for actual playback
+      char tone_to_play[ringtone_cfg::kMaxToneLen];
+      strncpy(tone_to_play, tone, sizeof(tone_to_play));
+      tone_to_play[sizeof(tone_to_play) - 1] = 0;
+
+      // Remove xN suffix if present
+      size_t play_len = strlen(tone_to_play);
+      if (play_len >= 2) {
+        if (tone_to_play[play_len - 2] == 'x' && isdigit((unsigned char)tone_to_play[play_len - 1])) {
+          tone_to_play[play_len - 2] = '\0';
+        }
+      }
+
+      for (uint8_t i = 0; i < repeat; i++) {
+        Serial.printf("[Ringtone] Playing repeat %d/%d\n", i + 1, repeat);
+        _ui->playRingtone(tone_to_play);
+
+        // Wait for playback to finish
+        // IMPORTANT: We must pump the buzzer loop while waiting, otherwise playback stalls!
+        uint32_t timeout = millis() + 5000; // Max wait 5s per repetition
+        // Wait until buzzer starts playing (it might take a moment)
+        delay(10);
+        while (_ui->isBuzzerPlaying() && millis() < timeout) {
+          _ui->pollBuzzer(); // CRITICAL: Keep the buzzer updating!
+          _ui->pollInput();  // Update button state
+
+          // Check for button press to stop playback
+          if (_ui->isButtonPressed()) {
+            Serial.println("[Ringtone] Button pressed, stopping playback");
+            _ui->stopBuzzer();
+            return; // Exit function immediately
+          }
+
+          delay(5); // Short delay to yield
+        }
+
+        // Gap between repeats (interruptible)
+        if (i < repeat - 1) {
+          uint32_t gap_start = millis();
+          while (millis() - gap_start < 1000) {
+            _ui->pollInput(); // Update button state
+            if (_ui->isButtonPressed()) {
+              Serial.println("[Ringtone] Button pressed during gap, stopping playback");
+              _ui->stopBuzzer();
+              return;
+            }
+            delay(50);
+          }
+        }
+      }
     } else {
       // Ensure we still emit an audible cue even when no RTTTL is configured.
       _ui->playRingtone("d=8,o=5,b=400:4c,4p,4c");
@@ -1736,7 +1981,7 @@ void MyMesh::maybePlayRingtone(const ContactInfo* from, const char* text) {
   }
 }
 
-void MyMesh::sendRingtoneChannelReply(int channel_idx, const char* text) {
+void MyMesh::sendRingtoneChannelReply(int channel_idx, const char *text) {
   if (channel_idx < 0 || text == NULL || !text[0]) return;
   ChannelDetails channel;
   if (!getChannel(channel_idx, channel)) return;
@@ -1746,7 +1991,7 @@ void MyMesh::sendRingtoneChannelReply(int channel_idx, const char* text) {
   }
 }
 
-void MyMesh::summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only) {
+void MyMesh::summarizeRingtoneStatus(const ContactInfo *from, int channel_idx, bool local_only) {
   (void)from;
   char response[256];
   if (_globalRingtone[0]) {
@@ -1763,18 +2008,20 @@ void MyMesh::summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, b
   }
 }
 
-bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_idx, const mesh::GroupChannel* channel, const char* text, bool local_only) {
+bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo *from, int channel_idx,
+                                           const mesh::GroupChannel *channel, const char *text,
+                                           bool local_only) {
   (void)channel;
   if (from) {
     return false; // ignore private /ringtone commands
   }
   if (!text) return false;
-  const char* cmd = trimLeft(text);
+  const char *cmd = trimLeft(text);
   if (strncmp(cmd, "/ringtone", 9) != 0) {
     return false;
   }
 
-  auto reply = [&](const char* message) {
+  auto reply = [&](const char *message) {
     if (!message) return;
     if (channel_idx >= 0) {
       if (local_only) {
@@ -1786,7 +2033,7 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_
   };
 
   // Space-delimited parsing; empty -> status query.
-  const char* args = trimLeft(cmd + 9);
+  const char *args = trimLeft(cmd + 9);
   if (*args == 0 || matchesToken(args, "list")) {
     summarizeRingtoneStatus(from, channel_idx, local_only);
     return true;
@@ -1824,10 +2071,70 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo* from, int channel_
     return true; // unable to determine scope
   }
 
+  // Parse repeat count suffix: "xN" where N is 1-9
+  // e.g., "...16c7 x3" or "...16c7x3" -> play 3 times
+  // IMPORTANT: We keep the full tone string INCLUDING the xN suffix for storage,
+  // so that maybePlayRingtone() can dynamically extract the repeat count on each playback
+  uint8_t repeat_count = 1; // default (for confirmation message only)
+  size_t tone_len = strlen(tone);
+
+  // Look for "xN" pattern at the end (with or without space before x)
+  if (tone_len >= 2) {
+    // Check for " xN" format (with space)
+    int space_idx = -1;
+    for (int p = tone_len - 1; p >= 0; --p) {
+      if (tone[p] == ' ') {
+        space_idx = p;
+        break;
+      }
+    }
+
+    // Try " xN" pattern first (space + x + digit)
+    if (space_idx >= 0 && (tone_len - space_idx) == 3) {
+      char x_char = tone[space_idx + 1];
+      char digit_char = tone[space_idx + 2];
+
+      if (x_char == 'x' && isdigit((unsigned char)digit_char)) {
+        int digit = digit_char - '0';
+        if (digit >= 1 && digit <= 9) {
+          repeat_count = (uint8_t)digit;
+          // Remove the space before x for cleaner storage (e.g., "16c7x3" not "16c7 x3")
+          // Copy " xN" to remove the space
+          memmove(&tone[space_idx], &tone[space_idx + 1], strlen(&tone[space_idx + 1]) + 1);
+        }
+      }
+    } else if (tone_len >= 2) {
+      // Try "xN" pattern without space (e.g., "16c7x3")
+      char x_char = tone[tone_len - 2];
+      char digit_char = tone[tone_len - 1];
+
+      if (x_char == 'x' && isdigit((unsigned char)digit_char)) {
+        int digit = digit_char - '0';
+        if (digit >= 1 && digit <= 9) {
+          repeat_count = (uint8_t)digit;
+        }
+      }
+    }
+  }
+
+  // Save the FULL tone string INCLUDING xN suffix
   strncpy(_globalRingtone, tone, sizeof(_globalRingtone));
   _globalRingtone[sizeof(_globalRingtone) - 1] = 0;
+  _ringtoneRepeatCount = repeat_count;
+
+  Serial.printf("[RingtoneCmd] Tone set (repeat_count=%d, stored_tone='%s')\n", repeat_count,
+                _globalRingtone);
+
   persistHeadlessRingtones();
-  reply(truncated ? "Global ringtone updated (truncated)" : "Global ringtone updated");
+
+  char response[96];
+  if (repeat_count > 1) {
+    snprintf(response, sizeof(response), "Global ringtone updated (repeat %d times)%s", repeat_count,
+             truncated ? " (truncated)" : "");
+  } else {
+    snprintf(response, sizeof(response), "Global ringtone updated%s", truncated ? " (truncated)" : "");
+  }
+  reply(response);
   return true;
 }
 #endif
@@ -1867,7 +2174,8 @@ uint32_t MyMesh::calcDirectTimeoutMillisFor(uint32_t pkt_airtime_millis, uint8_t
 
 void MyMesh::onSendTimeout() {}
 
-MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store, AbstractUITask* ui)
+MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables,
+               DataStore &store, AbstractUITask *ui)
     : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables),
       _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _ui(ui) {
   _iter_started = false;
@@ -1901,6 +2209,7 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   memset(_cannedMessages, 0, sizeof(_cannedMessages));
 #ifdef HEADLESS_CANNED_MESSAGES
   _globalRingtone[0] = 0;
+  _ringtoneRepeatCount = 1; // Default: play once
   for (size_t i = 0; i < ringtone_cfg::kMaxDeviceEntries; ++i) {
     _deviceRingtones[i].in_use = false;
     _deviceRingtones[i].tone[0] = 0;
@@ -2144,7 +2453,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     if (!success) {
       writeErrFrame(ERR_CODE_NOT_FOUND);
 #ifdef HEADLESS_CANNED_MESSAGES
-    } else if (txt_type == TXT_TYPE_PLAIN && handleIncomingRingtoneCommand(NULL, (int)channel_idx, &channel.channel, text, true)) {
+    } else if (txt_type == TXT_TYPE_PLAIN &&
+               handleIncomingRingtoneCommand(NULL, (int)channel_idx, &channel.channel, text, true)) {
       writeOKFrame();
 #endif
     } else if (handleLocalChannelCommand(channel_idx, text, channel)) {
@@ -2218,7 +2528,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
   } else if (cmd_frame[0] == CMD_SEND_SELF_ADVERT) {
-    mesh::Packet* pkt;
+    mesh::Packet *pkt;
     if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
       pkt = createSelfAdvert(_prefs.node_name);
     } else {
@@ -2248,7 +2558,7 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_ADD_UPDATE_CONTACT && len >= 1 + 32 + 2 + 1) {
     uint8_t *pub_key = &cmd_frame[1];
     ContactInfo *recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
-    uint32_t last_mod = getRTCClock()->getCurrentTime();  // fallback value if not present in cmd_frame
+    uint32_t last_mod = getRTCClock()->getCurrentTime(); // fallback value if not present in cmd_frame
     if (recipient) {
       updateContactFromFrame(*recipient, last_mod, cmd_frame, len);
       recipient->lastmod = last_mod;
@@ -2298,7 +2608,7 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_EXPORT_CONTACT) {
     if (len < 1 + PUB_KEY_SIZE) {
       // export SELF
-      mesh::Packet* pkt;
+      mesh::Packet *pkt;
       if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
         pkt = createSelfAdvert(_prefs.node_name);
       } else {
@@ -2395,8 +2705,10 @@ void MyMesh::handleCmdFrame(size_t len) {
     uint32_t rx = _prefs.rx_delay_base * 1000, af = _prefs.airtime_factor * 1000;
     int i = 0;
     out_frame[i++] = RESP_CODE_TUNING_PARAMS;
-    memcpy(&out_frame[i], &rx, 4); i += 4;
-    memcpy(&out_frame[i], &af, 4); i += 4;
+    memcpy(&out_frame[i], &rx, 4);
+    i += 4;
+    memcpy(&out_frame[i], &af, 4);
+    i += 4;
     _serial->writeFrame(out_frame, i);
   } else if (cmd_frame[0] == CMD_SET_OTHER_PARAMS) {
     _prefs.manual_add_contacts = cmd_frame[1];
@@ -2426,9 +2738,12 @@ void MyMesh::handleCmdFrame(size_t len) {
     uint16_t battery_millivolts = board.getBattMilliVolts();
     uint32_t used = _store->getStorageUsedKb();
     uint32_t total = _store->getStorageTotalKb();
-    memcpy(&reply[i], &battery_millivolts, 2); i += 2;
-    memcpy(&reply[i], &used, 4); i += 4;
-    memcpy(&reply[i], &total, 4); i += 4;
+    memcpy(&reply[i], &battery_millivolts, 2);
+    i += 2;
+    memcpy(&reply[i], &used, 4);
+    i += 4;
+    memcpy(&reply[i], &total, 4);
+    i += 4;
     _serial->writeFrame(reply, i);
   } else if (cmd_frame[0] == CMD_EXPORT_PRIVATE_KEY) {
 #if ENABLE_PRIVATE_KEY_EXPORT
@@ -2522,10 +2837,10 @@ void MyMesh::handleCmdFrame(size_t len) {
       // 'Path Discovery' is just a special case of flood + Telemetry req
       uint8_t req_data[9];
       req_data[0] = REQ_TYPE_GET_TELEMETRY_DATA;
-      req_data[1] = ~(TELEM_PERM_BASE);  // NEW: inverse permissions mask (ie. we only want BASE telemetry)
-      memset(&req_data[2], 0, 3);  // reserved
+      req_data[1] = ~(TELEM_PERM_BASE);    // NEW: inverse permissions mask (ie. we only want BASE telemetry)
+      memset(&req_data[2], 0, 3);          // reserved
       getRNG()->random(&req_data[5], 4);   // random blob to help make packet-hash unique
-      auto save = recipient->out_path_len;    // temporarily force sendRequest() to flood
+      auto save = recipient->out_path_len; // temporarily force sendRequest() to flood
       recipient->out_path_len = -1;
       int result = sendRequest(*recipient, req_data, sizeof(req_data), tag, est_timeout);
       recipient->out_path_len = save;
@@ -2543,7 +2858,8 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_NOT_FOUND); // contact not found
     }
-  } else if (cmd_frame[0] == CMD_SEND_TELEMETRY_REQ && len >= 4 + PUB_KEY_SIZE) {  // can deprecate, in favour of CMD_SEND_BINARY_REQ
+  } else if (cmd_frame[0] == CMD_SEND_TELEMETRY_REQ &&
+             len >= 4 + PUB_KEY_SIZE) { // can deprecate, in favour of CMD_SEND_BINARY_REQ
     uint8_t *pub_key = &cmd_frame[4];
     ContactInfo *recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
     if (recipient) {
@@ -2563,7 +2879,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_NOT_FOUND); // contact not found
     }
-  } else if (cmd_frame[0] == CMD_SEND_TELEMETRY_REQ && len == 4) {  // 'self' telemetry request
+  } else if (cmd_frame[0] == CMD_SEND_TELEMETRY_REQ && len == 4) { // 'self' telemetry request
     telemetry.reset();
     telemetry.addVoltage(TELEM_CHANNEL_SELF, (float)board.getBattMilliVolts() / 1000.0f);
     // query other sensors -- target specific
@@ -2734,10 +3050,10 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_ILLEGAL_ARG);
     }
-  } else if (cmd_frame[0] == CMD_GET_ADVERT_PATH && len >= PUB_KEY_SIZE+2) {
+  } else if (cmd_frame[0] == CMD_GET_ADVERT_PATH && len >= PUB_KEY_SIZE + 2) {
     // FUTURE use:  uint8_t reserved = cmd_frame[1];
     uint8_t *pub_key = &cmd_frame[2];
-    AdvertPath* found = NULL;
+    AdvertPath *found = NULL;
     for (int i = 0; i < ADVERT_PATH_TABLE_SIZE; i++) {
       auto p = &advert_paths[i];
       if (memcmp(p->pubkey_prefix, pub_key, sizeof(p->pubkey_prefix)) == 0) {
@@ -2759,15 +3075,15 @@ void MyMesh::handleCmdFrame(size_t len) {
     if (success) {
       writeOKFrame();
       delay(1000);
-      board.reboot();  // doesn't return
+      board.reboot(); // doesn't return
     } else {
       writeErrFrame(ERR_CODE_FILE_IO_ERROR);
     }
   } else if (cmd_frame[0] == CMD_SET_FLOOD_SCOPE && len >= 2 && cmd_frame[1] == 0) {
     if (len >= 2 + 16) {
-      memcpy(send_scope.key, &cmd_frame[2], sizeof(send_scope.key));  // set curr scope TransportKey
+      memcpy(send_scope.key, &cmd_frame[2], sizeof(send_scope.key)); // set curr scope TransportKey
     } else {
-      memset(send_scope.key, 0, sizeof(send_scope.key));  // set scope to null
+      memset(send_scope.key, 0, sizeof(send_scope.key)); // set scope to null
     }
     writeOKFrame();
   } else if (cmd_frame[0] == CMD_SEND_CONTROL_DATA && len >= 2 && (cmd_frame[1] & 0x80) != 0) {
@@ -2792,23 +3108,23 @@ void MyMesh::enterCLIRescue() {
 
 void MyMesh::checkCLIRescueCmd() {
   int len = strlen(cli_command);
-  while (Serial.available() && len < sizeof(cli_command)-1) {
+  while (Serial.available() && len < sizeof(cli_command) - 1) {
     char c = Serial.read();
     if (c != '\n') {
       cli_command[len++] = c;
       cli_command[len] = 0;
     }
-    Serial.print(c);  // echo
+    Serial.print(c); // echo
   }
-  if (len == sizeof(cli_command)-1) {  // command buffer full
-    cli_command[sizeof(cli_command)-1] = '\r';
+  if (len == sizeof(cli_command) - 1) { // command buffer full
+    cli_command[sizeof(cli_command) - 1] = '\r';
   }
 
-  if (len > 0 && cli_command[len - 1] == '\r') {  // received complete line
-    cli_command[len - 1] = 0;  // replace newline with C string null terminator
+  if (len > 0 && cli_command[len - 1] == '\r') { // received complete line
+    cli_command[len - 1] = 0;                    // replace newline with C string null terminator
 
     if (memcmp(cli_command, "set ", 4) == 0) {
-      const char* config = &cli_command[4];
+      const char *config = &cli_command[4];
       if (memcmp(config, "pin ", 4) == 0) {
         _prefs.ble_pin = atoi(&config[4]);
         savePrefs();
@@ -2886,7 +3202,7 @@ void MyMesh::checkCLIRescueCmd() {
 
       // get path from command e.g: "cat /contacts3"
       const char *path = &cli_command[4];
-      
+
       bool is_fs2 = false;
       if (memcmp(path, "UserData/", 9) == 0) {
         path += 8; // skip "UserData"
@@ -2904,7 +3220,7 @@ void MyMesh::checkCLIRescueCmd() {
       if (is_fs2 == true) {
         file = _store->openRead(_store->getSecondaryFS(), path);
       }
-      if(file){
+      if (file) {
 
         // get file content
         int file_size = file.available();
@@ -2916,7 +3232,6 @@ void MyMesh::checkCLIRescueCmd() {
         Serial.print("\n");
 
         file.close();
-
       }
 
     } else if (memcmp(cli_command, "rm ", 3) == 0) {
@@ -2924,16 +3239,16 @@ void MyMesh::checkCLIRescueCmd() {
       const char *path = &cli_command[3];
       MESH_DEBUG_PRINTLN("Removing file: %s", path);
       // ensure path is not empty, or root dir
-      if(!path || strlen(path) == 0 || strcmp(path, "/") == 0){
+      if (!path || strlen(path) == 0 || strcmp(path, "/") == 0) {
         Serial.println("Invalid path provided");
       } else {
-      bool is_fs2 = false;
-      if (memcmp(path, "UserData/", 9) == 0) {
-        path += 8; // skip "UserData"
-      } else if (memcmp(path, "ExtraFS/", 8) == 0) {
-        path += 7; // skip "ExtraFS"
-        is_fs2 = true;
-      }
+        bool is_fs2 = false;
+        if (memcmp(path, "UserData/", 9) == 0) {
+          path += 8; // skip "UserData"
+        } else if (memcmp(path, "ExtraFS/", 8) == 0) {
+          path += 7; // skip "ExtraFS"
+          is_fs2 = true;
+        }
 
         // remove file
         bool removed;
@@ -2944,21 +3259,20 @@ void MyMesh::checkCLIRescueCmd() {
           MESH_DEBUG_PRINTLN("Removing file from UserData: %s", path);
           removed = _store->removeFile(path);
         }
-        if(removed){
+        if (removed) {
           Serial.println("File removed");
         } else {
           Serial.println("Failed to remove file");
         }
-
       }
 
     } else if (strcmp(cli_command, "reboot") == 0) {
-      board.reboot();  // doesn't return
+      board.reboot(); // doesn't return
     } else {
       Serial.println("  Error: unknown command");
     }
 
-    cli_command[0] = 0;  // reset command buffer
+    cli_command[0] = 0; // reset command buffer
   }
 }
 
@@ -2984,8 +3298,8 @@ void MyMesh::checkSerialInterface() {
       _serial->writeFrame(out_frame, 5);
       _iter_started = false;
     }
-  //} else if (!_serial->isWriteBusy()) {
-  //  checkConnections();    // TODO - deprecate the 'Connections' stuff
+    //} else if (!_serial->isWriteBusy()) {
+    //  checkConnections();    // TODO - deprecate the 'Connections' stuff
   }
 }
 
@@ -3010,7 +3324,7 @@ void MyMesh::loop() {
 }
 
 bool MyMesh::advert() {
-  mesh::Packet* pkt;
+  mesh::Packet *pkt;
   if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
     pkt = createSelfAdvert(_prefs.node_name);
   } else {

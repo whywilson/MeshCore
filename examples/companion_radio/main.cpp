@@ -1,6 +1,9 @@
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 #include "MyMesh.h"
+#ifdef T1000_E
+#include "t1000e_sensors.h"
+#endif
 
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
@@ -109,6 +112,11 @@ void setup() {
   Serial.begin(115200);
 
   board.begin();
+  
+  // Initialize accelerometer for T1000-E
+  #ifdef T1000_E
+    t1000e_init_accel();
+  #endif
 
 #ifdef DISPLAY_CLASS
   DisplayDriver* disp = NULL;

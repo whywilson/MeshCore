@@ -9,7 +9,7 @@ void genericBuzzer::begin(bool suppress_startup) {
       digitalWrite(PIN_BUZZER_EN, HIGH);
     #endif
 
-        // If startup should be silent, leave quiet mode engaged until explicitly changed.
+        // If startup should be silent, leave Flip to mute engaged until explicitly changed.
         if (suppress_startup) {
             _is_quiet = true;
         } else {

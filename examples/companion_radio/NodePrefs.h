@@ -31,4 +31,5 @@ struct NodePrefs {  // persisted to file
   uint8_t notify_mode;
   uint32_t ble_pin;
   uint8_t  advert_loc_policy;
+  uint8_t flipmute_enabled;  // Auto-mute when device is face-down in dark
 };

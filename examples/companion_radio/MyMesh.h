@@ -220,6 +220,8 @@ private:
   void summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only);
   void sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text);
   bool handleLocalBuzzerCommand(uint8_t channel_idx, const char* text);
+  bool handleLocalFlipmuteCommand(uint8_t channel_idx, const char* text);
+  bool handleLocalSensorCommand(uint8_t channel_idx, const char* text);
   bool handleLocalPlayCommand(uint8_t channel_idx, const char* text);
   const char* describeNotifyMode(uint8_t mode) const;
   void loadTapTargetPrefs();
@@ -269,6 +271,7 @@ private:
 
 #ifdef HEADLESS_CANNED_MESSAGES
   char _globalRingtone[ringtone_cfg::kMaxToneLen];
+  uint8_t _ringtoneRepeatCount;  // Number of times to repeat RTTTL ringtone (1-10, default 1)
   DeviceRingtone _deviceRingtones[ringtone_cfg::kMaxDeviceEntries];
   TapTargetPrefs _tapTarget;
 #endif

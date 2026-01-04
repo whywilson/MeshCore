@@ -897,7 +897,7 @@ void UITask::toggleGPS() {
 }
 
 void UITask::toggleBuzzer() {
-    // Toggle buzzer quiet mode
+    // Toggle buzzer Flip to mute
   #ifdef PIN_BUZZER
     if (buzzer.isQuiet()) {
       buzzer.quiet(false);
@@ -909,4 +909,30 @@ void UITask::toggleBuzzer() {
     }
     _next_refresh = 0;  // trigger refresh
   #endif
+}
+
+bool UITask::isBuzzerPlaying() {
+#ifdef PIN_BUZZER
+  return buzzer.isPlaying();
+#else
+  return false;
+#endif
+}
+
+void UITask::pollBuzzer() {
+#ifdef PIN_BUZZER
+  buzzer.loop();
+#endif
+}
+
+void UITask::pollInput() {
+#ifdef PIN_USER_BTN
+  user_btn.check();
+#endif
+}
+
+void UITask::stopBuzzer() {
+#ifdef PIN_BUZZER
+  buzzer.play("");
+#endif
 }

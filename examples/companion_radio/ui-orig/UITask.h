@@ -99,6 +99,11 @@ public:
   void loop() override;
   void playRingtone(const char* melody) override;
   void onNotifyModeChanged(uint8_t mode) override;
+  bool isBuzzerPlaying() override;
+  void pollBuzzer() override;
+  void pollInput() override;
+  bool isButtonPressed() const override;
+  void stopBuzzer() override;
 
   void shutdown(bool restart = false);
 };

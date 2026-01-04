@@ -370,26 +370,11 @@ void UITask::loop() {
 #endif
 
 #ifdef PIN_BUZZER
-  static bool _buzzerWasPlaying = false;
-  static uint32_t _buzzStartMs = 0;
   if (buzzer.isPlaying())  {
-    if (!_buzzerWasPlaying) {
-      _buzzStartMs = millis();
-      Serial.printf("[CW] buzzer start t=%lu\n", (unsigned long)_buzzStartMs);
-      _buzzerWasPlaying = true;
-    }
     buzzer.loop();
   } else {
-    if (_buzzerWasPlaying) {
-      uint32_t now = millis();
-      Serial.printf("[CW] buzzer stop dur=%lu busy=%d queue=%u\n", (unsigned long)(now - _buzzStartMs),
-                    buzzer.isPlaying() ? 1 : 0, _cwCount);
-      _buzzerWasPlaying = false;
-    }
     // Drain CW queue when buzzer is free.
     if (_cwCount > 0) {
-      Serial.printf("[CW] pop head=%u count=%u len=%u\n", _cwHead, _cwCount,
-                    (unsigned)strlen(_cwQueue[_cwHead]));
       buzzer.play(_cwQueue[_cwHead]);
       _cwHead = (_cwHead + 1) % kCwQueueCapacity;
       --_cwCount;
@@ -564,6 +549,16 @@ void UITask::handleButtonAnyPress() {
 
 void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
+  
+  // Stop any playing RTTTL or CW when button is pressed
+#ifdef PIN_BUZZER
+  if (buzzer.isPlaying()) {
+    rtttl::stop();
+    Serial.println("[Button] Stopped ringtone/CW playback");
+    return;
+  }
+#endif
+
 #ifdef HEADLESS_CANNED_MESSAGES
   if (_cannedSelecting) {
     advanceCannedMessage();
@@ -635,7 +630,7 @@ void UITask::handleButtonTriplePress() {
     }
   }
 #else
-  // Non-headless: triple press toggles buzzer quiet mode
+  // Non-headless: triple press toggles buzzer Flip to mute
 #ifdef PIN_BUZZER
   if (buzzer.isQuiet()) {
     buzzer.quiet(false);
@@ -701,10 +696,33 @@ void UITask::playTone(const char *melody) {
 }
 
 void UITask::playRingtone(const char* melody) {
+  Serial.printf("[Ringtone] UITask::playRingtone called - melody='%s'\n", melody ? melody : "NULL");
+  Serial.printf("[Ringtone] _node_prefs=%p, flipmute_enabled=%d, notify_mode=%d\n", 
+                _node_prefs, (_node_prefs ? _node_prefs->flipmute_enabled : -1), 
+                (_node_prefs ? _node_prefs->notify_mode : -1));
+  
   // Also respect /buz off for ringtones/RTTTL/CW.
   if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
+    Serial.println("[Ringtone] notify_mode is OFF, returning");
     return;
   }
+  
+  // Check FlipMute: if enabled and device is face-down in dark, don't play sound
+  #ifdef T1000_E
+    extern bool t1000e_is_face_down_in_dark(uint32_t light_threshold_lux);
+    if (_node_prefs && _node_prefs->flipmute_enabled) {
+      Serial.println("[Ringtone] FlipMute enabled in UITask, checking orientation");
+      if (t1000e_is_face_down_in_dark(3)) {  // threshold: 3 lux
+        Serial.println("[FlipMute] Device face-down and dark in UITask::playRingtone, suppressing sound");
+        return;
+      }
+    } else {
+      if (_node_prefs) {
+        Serial.printf("[Ringtone] FlipMute disabled in UITask (flipmute_enabled=%d)\n", _node_prefs->flipmute_enabled);
+      }
+    }
+  #endif
+  
 #if defined(PIN_BUZZER)
   // In CW mode, always enqueue so playback path is unified and not interrupted mid-stream.
   if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_CW && melody) {
@@ -712,10 +730,8 @@ void UITask::playRingtone(const char* melody) {
       StrHelper::strncpy(_cwQueue[_cwTail], melody, kCwMaxLen);
       _cwTail = (_cwTail + 1) % kCwQueueCapacity;
       ++_cwCount;
-      Serial.printf("[CW] enqueue tail=%u count=%u len=%u\n", _cwTail, _cwCount, (unsigned)strlen(melody));
       // If buzzer idle, start immediately from head to avoid delay.
       if (!buzzer.isPlaying()) {
-        Serial.printf("[CW] kick play head=%u\n", _cwHead);
         buzzer.play(_cwQueue[_cwHead]);
         _cwHead = (_cwHead + 1) % kCwQueueCapacity;
         --_cwCount;
@@ -724,11 +740,7 @@ void UITask::playRingtone(const char* melody) {
     return;
   }
 #endif
-  Serial.printf("[CW] play immediate len=%u\n", melody ? (unsigned)strlen(melody) : 0);
   playTone(melody);
-#if defined(PIN_BUZZER)
-  Serial.printf("[CW] after play isPlaying=%d quiet=%d\n", buzzer.isPlaying() ? 1 : 0, buzzer.isQuiet() ? 1 : 0);
-#endif
 }
 
 void UITask::onNotifyModeChanged(uint8_t mode) {
@@ -757,4 +769,44 @@ bool UITask::toggleGPSSetting(bool &enabledOut) {
     }
   }
   return false;
+}
+
+bool UITask::isBuzzerPlaying() {
+#ifdef PIN_BUZZER
+  return buzzer.isPlaying();
+#else
+  return false;
+#endif
+}
+
+void UITask::pollBuzzer() {
+#ifdef PIN_BUZZER
+  buzzer.loop();
+#endif
+}
+
+void UITask::pollInput() {
+#ifdef PIN_USER_BTN
+  if (_userButton) _userButton->update();
+#endif
+#ifdef PIN_USER_BTN_ANA
+  if (_userButtonAnalog) _userButtonAnalog->update();
+#endif
+}
+
+bool UITask::isButtonPressed() const {
+#ifdef PIN_USER_BTN
+  if (_userButton) return _userButton->isPressed();
+#endif
+#ifdef PIN_USER_BTN_ANA
+  if (_userButtonAnalog) return _userButtonAnalog->isPressed();
+#endif
+  return false;
+}
+
+void UITask::stopBuzzer() {
+#ifdef PIN_BUZZER
+  // Play empty string to stop current playback
+  buzzer.play(""); 
+#endif
 }

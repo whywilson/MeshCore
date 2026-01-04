@@ -45,4 +45,9 @@ public:
   virtual void loop() = 0;
   virtual void playRingtone(const char* melody) { (void)melody; }
   virtual void onNotifyModeChanged(uint8_t mode) { (void)mode; }
+  virtual bool isBuzzerPlaying() { return false; }
+  virtual void pollBuzzer() {}
+  virtual void pollInput() {}
+  virtual bool isButtonPressed() const { return false; }
+  virtual void stopBuzzer() {}
 };

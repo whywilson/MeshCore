@@ -1,12 +1,25 @@
 #include "t1000e_sensors.h"
 
 #include <Arduino.h>
+#include <Wire.h>
 
 #define HEATER_NTC_BX 4250   // thermistor coefficient B
 #define HEATER_NTC_RP 8250   // ohm, series resistance to thermistor
 #define HEATER_NTC_KA 273.15 // 25 Celsius at Kelvin
 #define NTC_REF_VCC   3000   // mV, output voltage of LDO
 #define LIGHT_REF_VCC 2400   //
+
+// QMA6100P I2C address and registers
+#define QMA6100P_I2C_ADDR   0x12
+#define QMA6100P_REG_XOUT_L 0x00   // X output low byte
+#define QMA6100P_REG_XOUT_H 0x01   // X output high byte (start address for reading all 6 bytes)
+#define QMA6100P_REG_YOUT_L 0x02   // Y output low byte
+#define QMA6100P_REG_YOUT_H 0x03   // Y output high byte
+#define QMA6100P_REG_ZOUT_L 0x04   // Z output low byte
+#define QMA6100P_REG_ZOUT_H 0x05   // Z output high byte
+#define QMA6100P_REG_CHIP_ID 0x00  // Chip ID register (same as XOUT_L but different context)
+#define QMA6100P_REG_CTRL1  0x0B   // Control register 1
+#define QMA6100P_REG_CTRL7  0x32   // Control register 7 (data read mode)
 
 static unsigned int ntc_res2[136] = {
   113347, 107565, 102116, 96978, 92132, 87559, 83242, 79166, 75316, 71677, 68237, 64991, 61919, 59011,
@@ -96,4 +109,151 @@ uint32_t t1000e_get_light(void) {
   digitalWrite(SENSOR_EN, LOW);
 
   return lux;
+}
+
+// Initialize QMA6100P accelerometer
+void t1000e_init_accel() {
+  Serial.println("[Accel] Initializing QMA6100P...");
+  
+  // Ensure Wire is initialized
+  Wire.begin();
+  delay(10);
+  
+  // Enable accelerometer power
+  #ifdef PIN_3V3_ACC_EN
+    pinMode(PIN_3V3_ACC_EN, OUTPUT);
+    digitalWrite(PIN_3V3_ACC_EN, HIGH);
+    delay(100);  // Wait for power stabilization
+  #endif
+  
+  // Try to read register 0x00 to verify I2C communication and check data
+  Wire.beginTransmission(QMA6100P_I2C_ADDR);
+  Wire.write(0x00);
+  int result = Wire.endTransmission();
+  Serial.printf("[Accel] I2C select register 0x00: %d\n", result);
+  
+  if (result == 0) {
+    delay(10);
+    if (Wire.requestFrom(QMA6100P_I2C_ADDR, 6) == 6) {
+      uint8_t data[6];
+      for (int i = 0; i < 6; i++) {
+        data[i] = Wire.read();
+      }
+      Serial.printf("[Accel] Initial read bytes: %02X %02X %02X %02X %02X %02X\n", 
+                    data[0], data[1], data[2], data[3], data[4], data[5]);
+    }
+  }
+  
+  // Try wake up: set PWR_MGMT_1 (0x11) bit 7 to 1
+  Wire.beginTransmission(QMA6100P_I2C_ADDR);
+  Wire.write(0x11);  // PWR_MGMT_1
+  Wire.write(0x80);  // Wake up
+  result = Wire.endTransmission();
+  Serial.printf("[Accel] Wake-up write result: %d\n", result);
+  delay(100);
+  
+  Serial.println("[Accel] Init complete");
+}
+
+// Read accelerometer data from QMA6100P
+// Data format: 6 bytes starting from register 0x00
+// Read accelerometer data - most basic, reliable approach
+bool t1000e_read_accel(int8_t& x, int8_t& y, int8_t& z) {
+  x = 0;
+  y = 0;
+  z = 0;
+  
+  // Ensure power is on
+  #ifdef PIN_3V3_ACC_EN
+    digitalWrite(PIN_3V3_ACC_EN, HIGH);
+  #endif
+  
+  // Step 1: Send register address 0x01 (skip 0x00 status byte, start from XOUT_H)
+  Wire.beginTransmission(QMA6100P_I2C_ADDR);
+  Wire.write(0x01);  // Start from register 0x01 (XOUT_H), skip status byte at 0x00
+  int tx_result = Wire.endTransmission(true);  // STOP condition
+  
+  if (tx_result != 0) {
+    Serial.printf("[Accel] TX error: %d\n", tx_result);
+    return false;
+  }
+  
+  // Step 2: Wait for register pointer to be ready
+  delayMicroseconds(200);
+  
+  // Step 3: Read 6 bytes of data (XOUT_H, XOUT_L, YOUT_H, YOUT_L, ZOUT_H, ZOUT_L)
+  int bytes_read = Wire.requestFrom(QMA6100P_I2C_ADDR, (uint8_t)6, (uint8_t)true);
+  
+  if (bytes_read != 6) {
+    Serial.printf("[Accel] RX failed: got %d/6\n", bytes_read);
+    return false;
+  }
+  
+  uint8_t data[6];
+  for (int i = 0; i < 6; i++) {
+    data[i] = Wire.read();
+  }
+  
+  Serial.printf("[Accel] Raw 6: %02X %02X %02X %02X %02X %02X -> ", 
+                data[0], data[1], data[2], data[3], data[4], data[5]);
+  
+  // Parse as 16-bit big-endian, shift right by 2 for 8-bit result
+  // data[0-1] = X, data[2-3] = Y, data[4-5] = Z
+  int16_t raw_x = ((int16_t)data[0] << 8) | data[1];
+  int16_t raw_y = ((int16_t)data[2] << 8) | data[3];
+  int16_t raw_z = ((int16_t)data[4] << 8) | data[5];
+  
+  x = (int8_t)(raw_x >> 2);
+  y = (int8_t)(raw_y >> 2);
+  z = (int8_t)(raw_z >> 2);
+  
+  Serial.printf("x=%d y=%d z=%d\n", (int)x, (int)y, (int)z);
+  
+  return true;
+}
+
+// Check if device is face-down in dark: light < threshold AND device is inverted (face-down)
+// Returns true if device should be muted (face-down AND dark)
+bool t1000e_is_face_down_in_dark(uint32_t light_threshold_lux) {
+  // Check light level first (cheaper than I2C read)
+  uint32_t light = t1000e_get_light();
+  
+  Serial.printf("[FlipMute] Light:%lu lux (threshold:%lu) ", light, light_threshold_lux);
+  
+  // Dark enough check first
+  if (light >= light_threshold_lux) {
+    Serial.printf("-> NOT DARK ENOUGH (light >= %lu), ALLOWING SOUND\n", light_threshold_lux);
+    return false;  // Not dark enough
+  }
+  
+  Serial.printf("-> DARK ENOUGH (light < %lu), checking accel...\n", light_threshold_lux);
+  
+  // Now check accelerometer orientation
+  int8_t x, y, z;
+  bool accel_ok = t1000e_read_accel(x, y, z);
+  
+  if (!accel_ok) {
+    Serial.println("[FlipMute] Failed to read accelerometer, ALLOWING SOUND");
+    return false;  // Failed to read accelerometer
+  }
+  
+  // Face-down detection based on Z-axis
+  // Measured values (desktop):
+  // - Face-down:    z=64 (lowest - only this should trigger mute)
+  // - Face-left:    z=80
+  // - Face-right:   z=78
+  // - Face-up:      z=94 (highest - should allow sound)
+  // Z-axis represents vertical orientation: z<70 means face-down
+  
+  const int8_t Z_FACE_DOWN_THRESHOLD = 70;  // Only z<70 = face-down, z>=70 = other orientations
+  
+  Serial.printf("[FlipMute] Z-axis: %d | threshold: %d | ", (int)z, Z_FACE_DOWN_THRESHOLD);
+  
+  if (z < Z_FACE_DOWN_THRESHOLD) {
+    Serial.printf("*** DEVICE FACE-DOWN (z=%d < %d) -> MUTING SOUND ***\n", (int)z, Z_FACE_DOWN_THRESHOLD);
+    return true;
+  }
+  
+  Serial.printf("Device NOT face-down (z=%d >= %d) -> ALLOWING SOUND\n", (int)z, Z_FACE_DOWN_THRESHOLD);
+  return false;
 }
