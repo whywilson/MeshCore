@@ -7,6 +7,7 @@
 
 #ifdef HEADLESS_CANNED_MESSAGES
 #include <helpers/ChannelDetails.h>
+#include <helpers/ui/MorseCodeInput.h>
 #endif
 
 #ifdef PIN_BUZZER
@@ -41,6 +42,28 @@ class UITask : public AbstractUITask {
   bool _displayWasOn = false;  // Track display state before button press
   unsigned long ui_started_at;
 
+#ifdef PIN_STATUS_LED
+  int led_state = 0;
+  int next_led_change = 0;
+  int last_led_increment = 0;
+  bool _led_in_msg_select_mode = false;  // Track if in message selection mode
+  unsigned long _msg_select_blink_expiry = 0;  // When to turn LED back on after blink
+  struct LedPulseStep {
+    uint16_t duration_ms;
+    uint8_t state;
+  };
+  static constexpr uint8_t kLedTimeMaxSteps = 96;
+  LedPulseStep _led_time_steps[kLedTimeMaxSteps];
+  uint8_t _led_time_step_count = 0;
+  uint8_t _led_time_step_index = 0;
+  unsigned long _led_time_next_transition = 0;
+  bool _led_time_playback_active = false;
+  void startLedTimeAnnouncement();
+  void resetLedTimeAnnouncement();
+  void buildTimeLedPattern(uint8_t hour, uint8_t minute);
+  void appendLedSymbolSequence(const char* pattern, uint16_t gapAfterMs);
+#endif
+
   // Button handlers
 #ifdef PIN_USER_BTN
   Button* _userButton = nullptr;
@@ -66,10 +89,30 @@ class UITask : public AbstractUITask {
 
 #ifdef HEADLESS_CANNED_MESSAGES
   static constexpr uint32_t kCannedSelectionTimeoutMs = 10000;
-  bool _cannedSelecting = false;
+  bool _cannedSelecting = false;  // In message mode (canned or morse)
+  bool _morseInputMode = false;   // false = canned message mode, true = morse input mode
   int8_t _cannedIndex = -1;
   uint32_t _cannedLastInteraction = 0;
-
+  
+  // Morse Code Input variables
+  MorseCodeInput _morseInput;
+  bool _morse_is_pressed = false;
+  uint32_t _morse_light_threshold = 0;
+  unsigned long _morse_last_debounce_time = 0;
+  bool _morse_last_reading_state = false; // true = dark (pressed)
+  unsigned long _morse_press_duration_start = 0;
+  bool _morse_feedback_busy = false;  // True when playing feedback (skip light detection)
+  unsigned long _morse_feedback_end = 0;  // When feedback period ends
+  
+  // Morse Code Decoding
+  static constexpr size_t kMorseMessageMaxLen = 64;  // Max decoded message length
+  char _morse_message[kMorseMessageMaxLen + 1];  // Decoded message buffer
+  uint8_t _morse_message_len = 0;  // Length of decoded message
+  
+  void playMorseFeedback(bool isDash);  // Play morse dot/dash feedback
+  void finalizeMorseChar();  // Decode and append character to message
+  void sendMorseMessage();  // Send the decoded message
+  void speakMorseMessage();  // Play current morse message as audio
   void enterCannedMode();
   void exitCannedMode(bool playTone = true);
   void advanceCannedMessage();

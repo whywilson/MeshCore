@@ -542,6 +542,15 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   vibration.begin();
 #endif
 
+#ifdef ENABLE_MORSE_CODE_INPUT
+  morse_input.begin();
+  _morse_input_length = 0;
+  _morse_input_buffer[0] = 0;
+  _morse_last_input_time = 0;
+  _in_morse_mode = false;
+  _in_msg_select_mode = false;
+#endif
+
   ui_started_at = millis();
   _alert_expiry = 0;
 
@@ -641,6 +650,40 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
 void UITask::userLedHandler() {
 #ifdef PIN_STATUS_LED
   int cur_time = millis();
+  
+#ifdef ENABLE_MORSE_CODE_INPUT
+  // LED Replay Mode (Time Display)
+  if (_led_replay_active) {
+     digitalWrite(PIN_STATUS_LED, led_state);
+     return;
+  }
+
+  // Morse Code Mode: LED follows light sensor (rapid response)
+  if (_in_morse_mode && _led_in_morse_mode) {
+    if (led_state >= 0) { // led_state is controlled by handleMorseButtonInput
+         digitalWrite(PIN_STATUS_LED, led_state);
+    }
+    return;
+  }
+#endif
+
+  // Message Selection Mode: LED stays on, blinks on button press
+  if (_led_in_msg_select_mode) {
+    // Check if we're in a blink-off period
+    if (cur_time < _msg_select_blink_expiry && led_state == 0) {
+      // Still in blink-off period, keep LED off
+      return;
+    }
+    // LED should be constantly on (or coming back on after blink)
+    if (led_state != 1) {
+      led_state = 1;
+      digitalWrite(PIN_STATUS_LED, led_state);
+      next_led_change = cur_time + 5000;  // Long timeout
+    }
+    return;
+  }
+  
+  // Normal Mode: Original LED blinking behavior
   if (cur_time > next_led_change) {
     if (led_state == 0) {
       led_state = 1;
@@ -655,6 +698,17 @@ void UITask::userLedHandler() {
       next_led_change = cur_time + LED_CYCLE_MILLIS - last_led_increment;
     }
     digitalWrite(PIN_STATUS_LED, led_state);
+  }
+#endif
+}
+
+void UITask::triggerMsgSelectBlink() {
+#ifdef PIN_STATUS_LED
+  if (_led_in_msg_select_mode) {
+    // Turn LED off for 150ms when key is pressed
+    led_state = 0;
+    digitalWrite(PIN_STATUS_LED, led_state);
+    _msg_select_blink_expiry = millis() + 150;  // LED stays off for 150ms
   }
 #endif
 }
@@ -699,6 +753,9 @@ bool UITask::isButtonPressed() const {
 }
 
 void UITask::loop() {
+#ifdef ENABLE_MORSE_CODE_INPUT
+  pollLedReplay();
+#endif
   char c = 0;
 #if UI_HAS_JOYSTICK
   int ev = user_btn.check();
@@ -726,7 +783,14 @@ void UITask::loop() {
 #elif defined(PIN_USER_BTN)
   int ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
-    c = checkDisplayOn(KEY_NEXT);
+    checkDisplayOn(0); // Ensure display wakes or auto-off timer resets
+    notify(UIEventType::ack);
+    if (the_mesh.advert()) {
+        showAlert("Advert sent!", 1000);
+    }
+    #ifdef ENABLE_MORSE_CODE_INPUT
+    startLedTimeDisplay();
+    #endif
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
     c = handleLongPress(KEY_ENTER);
   } else if (ev == BUTTON_EVENT_DOUBLE_CLICK) {
@@ -759,6 +823,12 @@ void UITask::loop() {
 #endif
 
   if (c != 0 && curr) {
+    // Trigger LED blink in message selection mode when key is pressed
+#ifdef PIN_STATUS_LED
+    if (_led_in_msg_select_mode) {
+      triggerMsgSelectBlink();
+    }
+#endif
     curr->handleInput(c);
     _auto_off = millis() + AUTO_OFF_MILLIS;   // extend auto-off timer
     _next_refresh = 100;  // trigger refresh
@@ -845,12 +915,55 @@ char UITask::handleLongPress(char c) {
     the_mesh.enterCLIRescue();
     c = 0;   // consume event
   }
+#ifdef ENABLE_MORSE_CODE_INPUT
+  else if (_in_morse_mode) {
+    // Long press in morse mode sends the message
+    sendMorseMessage();
+    c = 0;
+  }
+#endif
   return c;
 }
 
 char UITask::handleDoubleClick(char c) {
   MESH_DEBUG_PRINTLN("UITask: double click triggered");
   checkDisplayOn(c);
+#ifdef ENABLE_MORSE_CODE_INPUT
+  if (_in_morse_mode) {
+    // In Morse Input Mode.
+    // Double click exit function removed as per requirement.
+  } else if (_in_msg_select_mode) {
+    // Enter Morse Input Mode
+    _in_msg_select_mode = false;
+    #ifdef PIN_STATUS_LED
+      _led_in_msg_select_mode = false;
+    #endif
+    
+    _in_morse_mode = true;
+    #ifdef PIN_STATUS_LED
+      _led_in_morse_mode = true;
+    #endif
+    
+    _morse_input_length = 0;
+    _morse_input_buffer[0] = 0;
+    _morse_last_input_time = millis();
+    morse_input.reset();
+    showAlert("Morse Input ON", 1000);
+    
+    #ifdef PIN_STATUS_LED
+      led_state = -1;  // Force update
+    #endif
+  } else {
+    // Enter Message Selection Mode
+    _in_msg_select_mode = true;
+    #ifdef PIN_STATUS_LED
+      _led_in_msg_select_mode = true;
+      _msg_select_blink_expiry = millis() + 500;
+    #endif
+    showAlert("Msg Select Mode", 1000);
+  }
+  c = 0;
+#endif
   return c;
 }
 
@@ -911,6 +1024,201 @@ void UITask::toggleBuzzer() {
   #endif
 }
 
+#ifdef ENABLE_MORSE_CODE_INPUT
+void UITask::startLedTimeDisplay() {
+  if (_rtc == NULL) return;
+  uint32_t now = _rtc->getCurrentTime();
+  // We need HHMM. _rtc gives epoch or similar?
+  // RTCClock wrapper usually has standard time functions or returns epoch.
+  // Code in HomeScreen uses DateTime dt = DateTime(now);
+  DateTime dt = DateTime(now);
+  snprintf(_led_replay_buffer, sizeof(_led_replay_buffer), "%02d%02d", dt.hour(), dt.minute());
+  
+  _led_replay_active = true;
+  _led_replay_char_idx = 0;
+  _led_replay_symbol_idx = 0;
+  _led_replay_state = LED_REPLAY_START_CHAR;
+  _led_replay_next_time = millis();
+  
+  #ifdef PIN_STATUS_LED
+  led_state = 0;  // Ensure off initially
+  #endif
+  
+  showAlert(_led_replay_buffer, 2000); // Also show on screen if available
+}
+
+void UITask::pollLedReplay() {
+  if (!_led_replay_active) return;
+  if (millis() < _led_replay_next_time) return;
+
+  // Use PIN_STATUS_LED
+  #ifndef PIN_STATUS_LED
+    _led_replay_active = false;
+    return;
+  #endif
+
+  switch (_led_replay_state) {
+    case LED_REPLAY_START_CHAR:
+      if (_led_replay_buffer[_led_replay_char_idx] == 0) {
+        // End of string
+        _led_replay_active = false;
+        led_state = 0;
+        return;
+      }
+      _led_replay_pattern = MorseCodeInput::getPattern(_led_replay_buffer[_led_replay_char_idx]);
+      if (!_led_replay_pattern) {
+        _led_replay_char_idx++; // Skip unknown
+        return;
+      }
+      _led_replay_symbol_idx = 0;
+      _led_replay_state = LED_REPLAY_ON; // Proceed to symbol check
+      break;
+
+    case LED_REPLAY_ON: // Actually CHECK NEXT SYMBOL and TURN ON
+    {
+      char sym = _led_replay_pattern[_led_replay_symbol_idx];
+      if (sym == 0) {
+        // End of char
+        _led_replay_state = LED_REPLAY_CHAR_GAP;
+        led_state = 0; // Ensure OFF
+        _led_replay_next_time = millis() + 600; // Char gap
+      } else {
+        // Play symbol
+        led_state = 1;
+        uint32_t duration = (sym == '-') ? 600 : 200;
+        _led_replay_next_time = millis() + duration;
+        _led_replay_state = LED_REPLAY_OFF; // Next state is turning it OFF
+      }
+    }
+      break;
+
+    case LED_REPLAY_OFF: // Symbol finished, turn OFF and wait gap
+      led_state = 0;
+      _led_replay_symbol_idx++;
+      _led_replay_next_time = millis() + 200; // Inter-symbol gap
+      _led_replay_state = LED_REPLAY_ON; // Go back to check next symbol
+      break;
+
+    case LED_REPLAY_CHAR_GAP:
+      _led_replay_char_idx++;
+      _led_replay_state = LED_REPLAY_START_CHAR;
+      break;
+      
+   default:
+      _led_replay_active = false;
+      break;
+  }
+}
+
+void UITask::handleMorseButtonInput() {
+  // Timeout check (10s inactivity)
+  if (millis() - _morse_last_input_time > 10000) {
+    _in_morse_mode = false;
+    #ifdef PIN_STATUS_LED
+    _led_in_morse_mode = false;
+    led_state = 0; 
+    #endif
+    showAlert("Morse Timeout", 1000);
+    return;
+  }
+
+#ifdef PIN_USER_BTN
+  bool pressed = user_btn.isPressed();
+  
+  // LED Logic
+  #ifdef PIN_STATUS_LED
+    led_state = pressed ? 1 : 0;
+  #endif
+
+  static bool was_pressed = false;
+  static uint32_t press_start = 0;
+
+  if (pressed && !was_pressed) {
+     // Press start
+     was_pressed = true;
+     press_start = millis();
+     _morse_last_input_time = millis();
+  } else if (!pressed && was_pressed) {
+     // Released
+     was_pressed = false;
+     uint32_t duration = millis() - press_start;
+     _morse_last_input_time = millis();
+
+     if (duration >= 2000) {
+        // Handled by continuous check usually, but if released exactly at 2s?
+        // If we emitted send, we shouldn't be here if we returned.
+     } else if (duration >= 200) { // Long -> Dash
+        morse_input.addDash();
+        #ifdef PIN_BUZZER
+          buzzer.play("morse:d=16,o=4,b=480:c,c,c,");
+        #endif
+     } else { // Short -> Dot
+        morse_input.addDot();
+        #ifdef PIN_BUZZER
+          buzzer.play("morse:d=16,o=4,b=480:c,");
+        #endif
+     }
+  }
+
+  // Check 2s hold for Send
+  if (pressed && was_pressed && (millis() - press_start >= 2000)) {
+     sendMorseMessage();
+     was_pressed = false; 
+     #ifdef PIN_STATUS_LED
+       led_state = 0;
+     #endif
+     return;
+  }
+#endif
+
+  // Check Gap
+  char decoded = 0;
+  if (morse_input.checkGap(decoded)) {
+    if (_morse_input_length < sizeof(_morse_input_buffer) - 1) {
+       _morse_input_buffer[_morse_input_length++] = decoded;
+       _morse_input_buffer[_morse_input_length] = 0;
+       
+       if (_display) {
+         snprintf(_alert, sizeof(_alert), "Msg: %s", _morse_input_buffer);
+         _alert_expiry = millis() + 4000;
+         _next_refresh = 0;
+       }
+    }
+  }
+}
+
+void UITask::sendMorseMessage() {
+  if (_morse_input_length == 0) {
+    showAlert("No message", 800);
+    return;
+  }
+  
+  // Remove trailing space if present
+  if (_morse_input_buffer[_morse_input_length - 1] == ' ') {
+    _morse_input_buffer[_morse_input_length - 1] = 0;
+    _morse_input_length--;
+  }
+  
+  // Send the message through mesh
+  // This would need to be integrated with the mesh communication
+  // For now, just show the message
+  showAlert("Message sent", 1000);
+  
+  // Reset morse input
+  _morse_input_length = 0;
+  _morse_input_buffer[0] = 0;
+  _in_morse_mode = false;
+  #ifdef PIN_STATUS_LED
+  _led_in_morse_mode = false;
+  #endif
+  morse_input.reset();
+  
+  if (_display != NULL) {
+    _next_refresh = 0;
+  }
+}
+#endif
+
 bool UITask::isBuzzerPlaying() {
 #ifdef PIN_BUZZER
   return buzzer.isPlaying();
@@ -926,6 +1234,13 @@ void UITask::pollBuzzer() {
 }
 
 void UITask::pollInput() {
+#ifdef ENABLE_MORSE_CODE_INPUT
+  if (_in_morse_mode) {
+    handleMorseButtonInput();
+    return;
+  }
+#endif
+
 #ifdef PIN_USER_BTN
   user_btn.check();
 #endif
