@@ -1150,9 +1150,13 @@ void UITask::playTone(const char *melody) {
 
 void UITask::playRingtone(const char* melody) {
   Serial.printf("[Ringtone] UITask::playRingtone called - melody='%s'\n", melody ? melody : "NULL");
+#ifdef ENABLE_FLIP_MUTE
   Serial.printf("[Ringtone] _node_prefs=%p, flipmute_enabled=%d, notify_mode=%d\n", 
                 _node_prefs, (_node_prefs ? _node_prefs->flipmute_enabled : -1), 
                 (_node_prefs ? _node_prefs->notify_mode : -1));
+#else
+  Serial.printf("[Ringtone] _node_prefs=%p, notify_mode=%d\n", _node_prefs, (_node_prefs ? _node_prefs->notify_mode : -1));
+#endif
   
   // Also respect /buz off for ringtones/RTTTL/CW.
   if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_OFF) {
@@ -1162,6 +1166,7 @@ void UITask::playRingtone(const char* melody) {
   
   // Check FlipMute: if enabled and device is face-down in dark, don't play sound
   #ifdef T1000_E
+  #ifdef ENABLE_FLIP_MUTE
     extern bool t1000e_is_face_down_in_dark(uint32_t light_threshold_lux);
     if (_node_prefs && _node_prefs->flipmute_enabled) {
       Serial.println("[Ringtone] FlipMute enabled in UITask, checking orientation");
@@ -1174,6 +1179,7 @@ void UITask::playRingtone(const char* melody) {
         Serial.printf("[Ringtone] FlipMute disabled in UITask (flipmute_enabled=%d)\n", _node_prefs->flipmute_enabled);
       }
     }
+  #endif
   #endif
   
 #if defined(PIN_BUZZER)

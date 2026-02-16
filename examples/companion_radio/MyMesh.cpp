@@ -989,6 +989,7 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char *text) {
   return true;
 }
 
+#ifdef ENABLE_FLIP_MUTE
 bool MyMesh::handleLocalFlipmuteCommand(uint8_t channel_idx, const char *text) {
   if (!text || strncmp(text, "/flipmute", 9) != 0) {
     return false;
@@ -1069,6 +1070,7 @@ bool MyMesh::handleLocalFlipmuteCommand(uint8_t channel_idx, const char *text) {
   sendLocalChannelSystemMessage(channel_idx, response);
   return true;
 }
+#endif
 
 bool MyMesh::handleLocalSensorCommand(uint8_t channel_idx, const char *text) {
   if (!text || strncmp(text, "/sensor", 7) != 0) {
@@ -1583,7 +1585,9 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   const char *cmd = skipWhitespace(text);
 #ifdef HEADLESS_CANNED_MESSAGES
   if (handleLocalBuzzerCommand(channel_idx, cmd)) return true;
+#ifdef ENABLE_FLIP_MUTE
   if (handleLocalFlipmuteCommand(channel_idx, cmd)) return true;
+#endif
   if (handleLocalSensorCommand(channel_idx, cmd)) return true;
   if (handleLocalPlayCommand(channel_idx, cmd)) return true;
   if (strncmp(cmd, kLocalCommandNames[static_cast<size_t>(LocalCommand::Tap)], 4) == 0) {
@@ -1817,12 +1821,17 @@ void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text) {
   if (_ui == NULL) return;
   uint8_t mode = _prefs.notify_mode;
 #ifdef MESH_DEBUG
+#ifdef ENABLE_FLIP_MUTE
   Serial.printf("[Ringtone] maybePlayRingtone called - mode=%d flipmute_enabled=%d\n", mode, _prefs.flipmute_enabled);
+#else
+  Serial.printf("[Ringtone] maybePlayRingtone called - mode=%d\n", mode);
+#endif
 #endif
   if (mode == NOTIFY_MODE_OFF) {
     return;
   }
 
+#ifdef ENABLE_FLIP_MUTE
   // Check FlipMute: if enabled and device is face-down in dark, don't play sound
   if (_prefs.flipmute_enabled) {
 #ifdef T1000_E
@@ -1844,6 +1853,7 @@ void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text) {
   } else {
     Serial.printf("[Ringtone] FlipMute is disabled (flipmute_enabled=%d)\n", _prefs.flipmute_enabled);
   }
+#endif
 
   if (mode == NOTIFY_MODE_CW) {
     if (!text || !text[0]) return;

@@ -220,7 +220,9 @@ private:
   void summarizeRingtoneStatus(const ContactInfo* from, int channel_idx, bool local_only);
   void sendLocalChannelSystemMessage(uint8_t channel_idx, const char* text);
   bool handleLocalBuzzerCommand(uint8_t channel_idx, const char* text);
+#ifdef ENABLE_FLIP_MUTE
   bool handleLocalFlipmuteCommand(uint8_t channel_idx, const char* text);
+#endif
   bool handleLocalSensorCommand(uint8_t channel_idx, const char* text);
   bool handleLocalPlayCommand(uint8_t channel_idx, const char* text);
   const char* describeNotifyMode(uint8_t mode) const;
