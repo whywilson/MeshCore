@@ -16,6 +16,15 @@ struct TapTargetPrefs {
   uint8_t contact_pub_key[PUB_KEY_SIZE] = {0};
   char name[32] = {0};
 };
+
+struct BuzzerPrefs {
+  static constexpr uint8_t kVersion = 1;
+  static constexpr uint8_t kMaxStoredChannels = 32;
+  uint8_t version = kVersion;
+  uint8_t global_override = 0;
+  uint8_t channel_set[kMaxStoredChannels] = {0};
+  uint8_t channel_mode[kMaxStoredChannels] = {0};
+};
 #endif
 
 class DataStoreHost {
@@ -59,6 +68,8 @@ public:
 #ifdef HEADLESS_CANNED_MESSAGES
   bool loadTapTarget(TapTargetPrefs& prefs);
   bool saveTapTarget(const TapTargetPrefs& prefs);
+  bool loadBuzzerPrefs(BuzzerPrefs& prefs);
+  bool saveBuzzerPrefs(const BuzzerPrefs& prefs);
 #endif
   void migrateToSecondaryFS();
   uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);

@@ -211,7 +211,7 @@ private:
   void loadHeadlessRingtones();
   void persistHeadlessRingtones();
   bool handleIncomingRingtoneCommand(const ContactInfo* from, int channel_idx, const mesh::GroupChannel* channel, const char* text, bool local_only = false);
-  void maybePlayRingtone(const ContactInfo* from, const char* text);
+  void maybePlayRingtone(const ContactInfo* from, const char* text, uint8_t mode_override = 0xFF);
   const char* getRingtoneFor(const ContactInfo* from) const;
   DeviceRingtone* findRingtoneEntry(const uint8_t* pub_key);
   DeviceRingtone* allocateRingtoneEntry(const uint8_t* pub_key);
@@ -226,6 +226,14 @@ private:
   bool handleLocalSensorCommand(uint8_t channel_idx, const char* text);
   bool handleLocalPlayCommand(uint8_t channel_idx, const char* text);
   const char* describeNotifyMode(uint8_t mode) const;
+  void setDefaultBuzzerPrefs();
+  void loadBuzzerPrefs();
+  void persistBuzzerPrefs();
+  bool tryParseNotifyModeToken(const char* token, uint8_t& out_mode) const;
+  uint8_t resolveChannelNotifyMode(uint8_t channel_idx) const;
+  void summarizeBuzzerStatus(uint8_t channel_idx, bool include_all_channels);
+  bool hasGlobalBuzzerFlag(const char* args) const;
+  bool extractFirstBuzzerToken(const char* args, char* token, size_t token_len) const;
   void loadTapTargetPrefs();
   void persistTapTargetPrefs();
   void setDefaultTapTarget();
@@ -275,6 +283,7 @@ private:
   char _globalRingtone[ringtone_cfg::kMaxToneLen];
   uint8_t _ringtoneRepeatCount;  // Number of times to repeat RTTTL ringtone (1-10, default 1)
   DeviceRingtone _deviceRingtones[ringtone_cfg::kMaxDeviceEntries];
+  BuzzerPrefs _buzzerPrefs;
   TapTargetPrefs _tapTarget;
 #endif
 

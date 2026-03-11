@@ -894,6 +894,177 @@ const char *MyMesh::describeNotifyMode(uint8_t mode) const {
   }
 }
 
+void MyMesh::setDefaultBuzzerPrefs() {
+  _buzzerPrefs.version = BuzzerPrefs::kVersion;
+  _buzzerPrefs.global_override = 0;
+  memset(_buzzerPrefs.channel_set, 0, sizeof(_buzzerPrefs.channel_set));
+  memset(_buzzerPrefs.channel_mode, 0, sizeof(_buzzerPrefs.channel_mode));
+}
+
+void MyMesh::persistBuzzerPrefs() {
+  _store->saveBuzzerPrefs(_buzzerPrefs);
+}
+
+void MyMesh::loadBuzzerPrefs() {
+  setDefaultBuzzerPrefs();
+  BuzzerPrefs stored;
+  if (_store->loadBuzzerPrefs(stored) && stored.version == BuzzerPrefs::kVersion) {
+    _buzzerPrefs = stored;
+  }
+
+  bool changed = false;
+  _buzzerPrefs.global_override = _buzzerPrefs.global_override ? 1 : 0;
+  for (size_t i = 0; i < BuzzerPrefs::kMaxStoredChannels; ++i) {
+    _buzzerPrefs.channel_set[i] = _buzzerPrefs.channel_set[i] ? 1 : 0;
+    if (_buzzerPrefs.channel_mode[i] > NOTIFY_MODE_OFF) {
+      _buzzerPrefs.channel_mode[i] = NOTIFY_MODE_RTTTL;
+      _buzzerPrefs.channel_set[i] = 0;
+      changed = true;
+    }
+  }
+  if (changed) {
+    persistBuzzerPrefs();
+  }
+}
+
+bool MyMesh::tryParseNotifyModeToken(const char *token, uint8_t &out_mode) const {
+  if (!token || !*token) return false;
+  char c = (char)tolower((unsigned char)token[0]);
+  if (c == 'r') {
+    out_mode = NOTIFY_MODE_RTTTL;
+    return true;
+  }
+  if (c == 'c') {
+    out_mode = NOTIFY_MODE_CW;
+    return true;
+  }
+  if (c == 'o') {
+    out_mode = NOTIFY_MODE_OFF;
+    return true;
+  }
+  return false;
+}
+
+bool MyMesh::hasGlobalBuzzerFlag(const char *args) const {
+  if (!args) return false;
+  const char *cursor = skipWhitespace(args);
+  while (*cursor) {
+    const char *start = cursor;
+    while (*cursor && !isspace((unsigned char)*cursor)) {
+      ++cursor;
+    }
+    size_t len = (size_t)(cursor - start);
+    if (len == 8 && strncmp(start, "--global", 8) == 0) {
+      return true;
+    }
+    if (len == 3 && strncmp(start, "--g", 3) == 0) {
+      return true;
+    }
+    cursor = skipWhitespace(cursor);
+  }
+  return false;
+}
+
+bool MyMesh::extractFirstBuzzerToken(const char *args, char *token, size_t token_len) const {
+  if (!token || token_len == 0) return false;
+  token[0] = 0;
+  if (!args) return false;
+  const char *cursor = skipWhitespace(args);
+  while (*cursor) {
+    const char *start = cursor;
+    while (*cursor && !isspace((unsigned char)*cursor)) {
+      ++cursor;
+    }
+    size_t len = (size_t)(cursor - start);
+    if (len > 0) {
+      bool is_flag = false;
+      if (len == 3 && strncmp(start, "--g", 3) == 0) {
+        is_flag = true;
+      } else if (len == 8 && strncmp(start, "--global", 8) == 0) {
+        is_flag = true;
+      }
+      if (!is_flag) {
+        size_t copy_len = len < (token_len - 1) ? len : (token_len - 1);
+        memcpy(token, start, copy_len);
+        token[copy_len] = 0;
+        return true;
+      }
+    }
+    cursor = skipWhitespace(cursor);
+  }
+  return false;
+}
+
+uint8_t MyMesh::resolveChannelNotifyMode(uint8_t channel_idx) const {
+  if (_buzzerPrefs.global_override) {
+    return _prefs.notify_mode;
+  }
+  if (channel_idx < BuzzerPrefs::kMaxStoredChannels && _buzzerPrefs.channel_set[channel_idx]) {
+    return _buzzerPrefs.channel_mode[channel_idx];
+  }
+  return _prefs.notify_mode;
+}
+
+void MyMesh::summarizeBuzzerStatus(uint8_t channel_idx, bool include_all_channels) {
+  if (include_all_channels) {
+    char response[1024];
+    size_t pos = 0;
+    pos += snprintf(response + pos, sizeof(response) - pos, "Buzzer all channels, global=%s",
+                    describeNotifyMode(_prefs.notify_mode));
+
+    bool any_channel = false;
+    for (uint8_t idx = 0; idx < MAX_GROUP_CHANNELS; ++idx) {
+      ChannelDetails channel;
+      if (!getChannel(idx, channel)) continue;
+      bool valid_channel = channel.name[0] != 0;
+      if (!valid_channel) {
+        for (size_t i = 0; i < sizeof(channel.channel.secret); ++i) {
+          if (channel.channel.secret[i] != 0) {
+            valid_channel = true;
+            break;
+          }
+        }
+      }
+      if (!valid_channel) continue;
+      any_channel = true;
+      const char *local_mode = "default";
+      if (idx < BuzzerPrefs::kMaxStoredChannels && _buzzerPrefs.channel_set[idx]) {
+        local_mode = describeNotifyMode(_buzzerPrefs.channel_mode[idx]);
+      }
+      if (pos < sizeof(response) - 1) {
+        pos += snprintf(response + pos, sizeof(response) - pos, "\nBuzzer CH%u(%s): %s, global=%s", idx,
+                        channel.name, local_mode, describeNotifyMode(_prefs.notify_mode));
+        if (pos >= sizeof(response)) {
+          response[sizeof(response) - 1] = 0;
+          break;
+        }
+      }
+    }
+    if (!any_channel) {
+      if (pos < sizeof(response) - 1) {
+        pos += snprintf(response + pos, sizeof(response) - pos, "\nNo channels configured");
+      }
+    }
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return;
+  }
+
+  const char *local_mode = "default";
+  if (channel_idx < BuzzerPrefs::kMaxStoredChannels && _buzzerPrefs.channel_set[channel_idx]) {
+    local_mode = describeNotifyMode(_buzzerPrefs.channel_mode[channel_idx]);
+  }
+  const char *channel_name = "Unknown";
+  ChannelDetails channel;
+  if (getChannel(channel_idx, channel) && channel.name[0]) {
+    channel_name = channel.name;
+  }
+  char response[160];
+  snprintf(response, sizeof(response),
+           "Buzzer CH%u(%s): %s, global=%s\nUsage: /buz rtttl|cw|off [--global|--g]",
+           channel_idx, channel_name, local_mode, describeNotifyMode(_prefs.notify_mode));
+  sendLocalChannelSystemMessage(channel_idx, response);
+}
+
 bool MyMesh::handleLocalPlayCommand(uint8_t channel_idx, const char *text) {
   if (!text || strncmp(text, "/play", 5) != 0) {
     return false;
@@ -924,67 +1095,63 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char *text) {
   const char *args = text + 4;
   args = skipWhitespace(args);
 
-  // Space-delimited: no '=' or '?' handling. Empty -> query.
+  bool global_flag = hasGlobalBuzzerFlag(args);
+  char mode_token[24];
+  bool has_mode_token = extractFirstBuzzerToken(args, mode_token, sizeof(mode_token));
 
-  if (*args == 0) {
-    char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
-             describeNotifyMode(_prefs.notify_mode));
-    sendLocalChannelSystemMessage(channel_idx, response);
+  if (!has_mode_token) {
+    summarizeBuzzerStatus(channel_idx, global_flag);
     return true;
   }
 
-  // Robust parse: look for first ASCII letter and decide by it.
-  char first_letter = 0;
-  const char *p = args;
-  while (*p) {
-    unsigned char ch = (unsigned char)*p;
-    if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
-      first_letter = (char)tolower(ch);
-      break;
+  uint8_t new_mode = NOTIFY_MODE_RTTTL;
+  if (!tryParseNotifyModeToken(mode_token, new_mode)) {
+    summarizeBuzzerStatus(channel_idx, global_flag);
+    return true;
+  }
+
+  if (global_flag) {
+    bool changed = (_prefs.notify_mode != new_mode) || (_buzzerPrefs.global_override == 0);
+    _prefs.notify_mode = new_mode;
+    _buzzerPrefs.global_override = 1;
+    savePrefs();
+    persistBuzzerPrefs();
+    if (_ui) {
+      _ui->onNotifyModeChanged(new_mode);
     }
-    ++p;
-  }
 
-  if (!first_letter) {
-    char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
-             describeNotifyMode(_prefs.notify_mode));
+    char response[96];
+    if (changed) {
+      snprintf(response, sizeof(response), "Global buzzer override set to %s", describeNotifyMode(new_mode));
+    } else {
+      snprintf(response, sizeof(response), "Global buzzer override already %s", describeNotifyMode(new_mode));
+    }
     sendLocalChannelSystemMessage(channel_idx, response);
     return true;
   }
 
-  uint8_t new_mode = _prefs.notify_mode;
-  if (first_letter == 'r') {
-    new_mode = NOTIFY_MODE_RTTTL;
-  } else if (first_letter == 'c') {
-    new_mode = NOTIFY_MODE_CW;
-  } else if (first_letter == 'o') {
-    new_mode = NOTIFY_MODE_OFF;
+  if (channel_idx >= BuzzerPrefs::kMaxStoredChannels) {
+    sendLocalChannelSystemMessage(channel_idx, "Channel buzzer setting unsupported for this channel index");
+    return true;
+  }
+
+  bool already_same = _buzzerPrefs.channel_set[channel_idx] && _buzzerPrefs.channel_mode[channel_idx] == new_mode;
+  _buzzerPrefs.channel_set[channel_idx] = 1;
+  _buzzerPrefs.channel_mode[channel_idx] = new_mode;
+  persistBuzzerPrefs();
+
+  char response[128];
+  if (already_same) {
+    snprintf(response, sizeof(response), "Channel buzzer already %s", describeNotifyMode(new_mode));
   } else {
-    char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode: %s\nUsage: /buz rtttl|cw|off",
-             describeNotifyMode(_prefs.notify_mode));
-    sendLocalChannelSystemMessage(channel_idx, response);
-    return true;
+    uint8_t effective_mode = resolveChannelNotifyMode(channel_idx);
+    if (_buzzerPrefs.global_override) {
+      snprintf(response, sizeof(response), "Channel buzzer set to %s (currently overridden by global=%s)",
+               describeNotifyMode(new_mode), describeNotifyMode(_prefs.notify_mode));
+    } else {
+      snprintf(response, sizeof(response), "Channel buzzer set to %s", describeNotifyMode(effective_mode));
+    }
   }
-
-  if (new_mode == _prefs.notify_mode) {
-    char response[64];
-    snprintf(response, sizeof(response), "Buzzer mode already %s", describeNotifyMode(new_mode));
-    sendLocalChannelSystemMessage(channel_idx, response);
-    return true;
-  }
-
-  _prefs.notify_mode = new_mode;
-  savePrefs();
-
-  if (_ui) {
-    _ui->onNotifyModeChanged(new_mode);
-  }
-
-  char response[64];
-  snprintf(response, sizeof(response), "Buzzer mode set to %s", describeNotifyMode(new_mode));
   sendLocalChannelSystemMessage(channel_idx, response);
   return true;
 }
@@ -1256,11 +1423,15 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     return; // drop further handling for duplicate copies
   }
 
+  int channel_idx_int = findChannelIdx(channel);
+  uint8_t channel_idx = channel_idx_int < 0 ? 0xFF : (uint8_t)channel_idx_int;
+  uint8_t notify_mode = resolveChannelNotifyMode(channel_idx);
+
   // Decide whether to ring once for this hash.
   bool should_ring = false;
   uint8_t notify_hash[MAX_HASH_SIZE];
   const uint8_t *ring_hash = pkt_hash;
-  if (_prefs.notify_mode == NOTIFY_MODE_CW) {
+  if (notify_mode == NOTIFY_MODE_CW) {
     if (computeTextHash(text, notify_hash)) {
       ring_hash = notify_hash; // dedupe by content so forwarded copies share hash
     }
@@ -1271,21 +1442,19 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
 
   Serial.printf("[CHAN] hash=%02X%02X%02X%02X ringHash=%02X%02X%02X%02X mode=%u ring=%d textLen=%d path=%u\n",
                 pkt_hash[0], pkt_hash[1], pkt_hash[2], pkt_hash[3], ring_hash[0], ring_hash[1], ring_hash[2],
-                ring_hash[3], _prefs.notify_mode, should_ring ? 1 : 0, text ? (int)strlen(text) : -1,
+                ring_hash[3], notify_mode, should_ring ? 1 : 0, text ? (int)strlen(text) : -1,
                 pkt->isRouteFlood() ? pkt->path_len : 0xFF);
 
   if (should_ring) {
-    maybePlayRingtone(NULL, text); // play once per unique hash
-    if (_prefs.notify_mode == NOTIFY_MODE_CW) {
+    maybePlayRingtone(NULL, text, notify_mode); // play once per unique hash
+    if (notify_mode == NOTIFY_MODE_CW) {
       _last_cw_group_valid = true;
       memcpy(_last_cw_group_hash, ring_hash, MAX_HASH_SIZE);
     }
-  } else if (_prefs.notify_mode != NOTIFY_MODE_CW) {
-    Serial.printf("[CHAN] no-ring mode%u hash=%02X%02X%02X%02X\n", _prefs.notify_mode, pkt_hash[0],
+  } else if (notify_mode != NOTIFY_MODE_CW) {
+    Serial.printf("[CHAN] no-ring mode%u hash=%02X%02X%02X%02X\n", notify_mode, pkt_hash[0],
                   pkt_hash[1], pkt_hash[2], pkt_hash[3]);
   }
-  int channel_idx_int = findChannelIdx(channel);
-  uint8_t channel_idx = channel_idx_int < 0 ? 0xFF : (uint8_t)channel_idx_int;
   uint8_t path_len = pkt->isRouteFlood() ? pkt->path_len : 0xFF;
   int8_t snr_quarter = (int8_t)(pkt->getSNR() * 4);
   emitChannelMessageToApp(channel_idx, path_len, timestamp, text, snr_quarter);
@@ -1602,7 +1771,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
-    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off\n/ringtone [list|<rtttl>]\n/tap "
+    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/ringtone [list|<rtttl>]\n/tap "
                        "[here]\n\n/flipmute on|off";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
@@ -1817,9 +1986,9 @@ const char *MyMesh::getRingtoneFor(const ContactInfo *from) const {
   return NULL;
 }
 
-void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text) {
+void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text, uint8_t mode_override) {
   if (_ui == NULL) return;
-  uint8_t mode = _prefs.notify_mode;
+  uint8_t mode = (mode_override <= NOTIFY_MODE_OFF) ? mode_override : _prefs.notify_mode;
 #ifdef MESH_DEBUG
 #ifdef ENABLE_FLIP_MUTE
   Serial.printf("[Ringtone] maybePlayRingtone called - mode=%d flipmute_enabled=%d\n", mode, _prefs.flipmute_enabled);
@@ -2226,6 +2395,7 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
     memset(_deviceRingtones[i].pub_key, 0, sizeof(_deviceRingtones[i].pub_key));
     _deviceRingtones[i].updated_at = 0;
   }
+  setDefaultBuzzerPrefs();
   setDefaultTapTarget();
 #endif
 
@@ -2306,6 +2476,7 @@ void MyMesh::begin(bool has_display) {
   loadHeadlessCannedMessages();
 #ifdef HEADLESS_CANNED_MESSAGES
   loadHeadlessRingtones();
+  loadBuzzerPrefs();
   loadTapTargetPrefs();
 #endif
 

@@ -513,6 +513,29 @@ bool DataStore::saveTapTarget(const TapTargetPrefs& prefs) {
   file.close();
   return written == sizeof(prefs);
 }
+
+bool DataStore::loadBuzzerPrefs(BuzzerPrefs& prefs) {
+  File file = openRead(_getContactsChannelsFS(), "/buzzer.cfg");
+  if (!file) {
+    return false;
+  }
+  size_t read_len = file.read((uint8_t*)&prefs, sizeof(prefs));
+  file.close();
+  if (read_len != sizeof(prefs)) {
+    return false;
+  }
+  return prefs.version == BuzzerPrefs::kVersion;
+}
+
+bool DataStore::saveBuzzerPrefs(const BuzzerPrefs& prefs) {
+  File file = openWrite(_getContactsChannelsFS(), "/buzzer.cfg");
+  if (!file) {
+    return false;
+  }
+  size_t written = file.write((const uint8_t*)&prefs, sizeof(prefs));
+  file.close();
+  return written == sizeof(prefs);
+}
 #endif
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
