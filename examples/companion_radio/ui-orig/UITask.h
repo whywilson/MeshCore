@@ -25,7 +25,7 @@ class UITask : public AbstractUITask {
 #ifdef PIN_BUZZER
   genericBuzzer buzzer;
   static constexpr uint8_t kCwQueueCapacity = 4;
-  static constexpr uint16_t kCwMaxLen = 520;
+  static constexpr uint16_t kCwMaxLen = 1536;
   char _cwQueue[kCwQueueCapacity][kCwMaxLen];
   uint8_t _cwHead = 0;
   uint8_t _cwTail = 0;

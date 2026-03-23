@@ -1739,7 +1739,7 @@ void MyMesh::summarizeCannedMessages(uint8_t channel_idx) {
 enum class LocalCommand : uint8_t { Msg = 0, Buz, Ringtone, Play, Tap, Help, Count };
 
 static constexpr const char *kLocalCommandNames[] = {
-  "/msg", "/buz", "/ringtone", "/play", "/tap", "/help",
+  "/msg", "/buz", "/rtttl", "/play", "/tap", "/help",
 };
 
 static_assert(static_cast<size_t>(LocalCommand::Count) ==
@@ -1771,7 +1771,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
-    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/ringtone [list|<rtttl>]\n/tap "
+    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/rtttl [list|<rtttl>]\n/tap "
                        "[here]\n\n/flipmute on|off";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
@@ -2065,7 +2065,7 @@ void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text, uint8_
     if (!payload || !payload[0]) return;
 
     // Larger buffer reduces premature truncation for long CW strings.
-    char cwBuffer[512];
+    char cwBuffer[1536];
     bool has_morse = buildMorseRtttl(payload, cwBuffer, sizeof(cwBuffer));
     if (!has_morse) {
       // If the text cannot be converted to Morse (e.g. only non-ASCII chars),
@@ -2192,11 +2192,16 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo *from, int channel_
                                            bool local_only) {
   (void)channel;
   if (from) {
-    return false; // ignore private /ringtone commands
+    return false; // ignore private /rtttl commands
   }
   if (!text) return false;
   const char *cmd = trimLeft(text);
-  if (strncmp(cmd, "/ringtone", 9) != 0) {
+  int cmd_len = 0;
+  if (strncmp(cmd, "/rtttl", 6) == 0) {
+    cmd_len = 6;
+  } else if (strncmp(cmd, "/ringtone", 9) == 0) { // legacy alias
+    cmd_len = 9;
+  } else {
     return false;
   }
 
@@ -2212,7 +2217,7 @@ bool MyMesh::handleIncomingRingtoneCommand(const ContactInfo *from, int channel_
   };
 
   // Space-delimited parsing; empty -> status query.
-  const char *args = trimLeft(cmd + 9);
+  const char *args = trimLeft(cmd + cmd_len);
   if (*args == 0 || matchesToken(args, "list")) {
     summarizeRingtoneStatus(from, channel_idx, local_only);
     return true;
@@ -2621,7 +2626,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     char *text = (char *)&cmd_frame[i];
     int tlen = len - i;
     // Ensure the incoming text payload is null-terminated so command parsers
-    // (e.g. /ringtone) don't read past the frame when the app sends no payload.
+    // (e.g. /rtttl) don't read past the frame when the app sends no payload.
     if (tlen >= 0 && i + tlen < (int)sizeof(cmd_frame)) {
       text[tlen] = 0;
     } else {
