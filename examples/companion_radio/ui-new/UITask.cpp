@@ -1,4 +1,5 @@
 #include "UITask.h"
+#include "TamagotchiScreen.h"
 #include <helpers/TxtDataHelpers.h>
 #include "../MyMesh.h"
 #include "target.h"
@@ -7,9 +8,11 @@
 #endif
 
 #ifndef AUTO_OFF_MILLIS
-  #define AUTO_OFF_MILLIS     15000   // 15 seconds
+  #define AUTO_OFF_MILLIS     120000  // 2 minutes
 #endif
 #define BOOT_SCREEN_MILLIS   3000   // 3 seconds
+#define TAMA_JUMP_HOLD_MILLIS 220
+#define TAMA_WALK_HOLD_MILLIS 260
 
 #ifdef PIN_STATUS_LED
 #define LED_ON_MILLIS     20
@@ -551,7 +554,12 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _sensors = sensors;
   _auto_off = millis() + AUTO_OFF_MILLIS;
 
-#if defined(PIN_USER_BTN)
+#if UI_HAS_JOYSTICK
+  user_btn.begin();
+  joystick_left.begin();
+  joystick_right.begin();
+  back_btn.begin();
+#elif defined(PIN_USER_BTN)
   user_btn.begin();
 #endif
 #if defined(PIN_USER_BTN_ANA)
@@ -591,6 +599,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   splash = new SplashScreen(this);
   home = new HomeScreen(this, &rtc_clock, sensors, node_prefs);
   msg_preview = new MsgPreviewScreen(this, &rtc_clock);
+  tamagotchi = new TamagotchiScreen(this);
   setCurrScreen(splash);
 }
 
@@ -598,6 +607,8 @@ void UITask::showAlert(const char* text, int duration_millis) {
   strcpy(_alert, text);
   _alert_expiry = millis() + duration_millis;
 }
+#define TAMA_BUZZER_WALK  "walk:d=32,o=6,b=200:c"
+#define TAMA_BUZZER_JUMP  "jump:d=32,o=7,b=200:e,g"
 
 void UITask::notify(UIEventType t) {
 #if defined(PIN_BUZZER)
@@ -611,6 +622,9 @@ switch(t){
     break;
   case UIEventType::ack:
     buzzer.play("ack:d=32,o=8,b=120:c");
+    break;
+  case UIEventType::newHandshake:
+    buzzer.play("wave:d=32,o=6,b=160:c,e,g");
     break;
   case UIEventType::roomMessage:
   case UIEventType::newContactMessage:
@@ -626,6 +640,26 @@ switch(t){
     vibration.trigger();
   }
 #endif
+
+  // Feed tamagotchi stress / wave animation
+  if (tamagotchi) {
+    TamagotchiScreen* tama = (TamagotchiScreen*)tamagotchi;
+    switch (t) {
+      case UIEventType::newHandshake:
+        tama->onHandshake();
+        break;
+      case UIEventType::contactMessage:
+      case UIEventType::channelMessage:
+      case UIEventType::newContactMessage:
+        tama->onMeshActivity(10);
+        break;
+      case UIEventType::ack:
+        tama->onMeshActivity(3);
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 
@@ -639,8 +673,15 @@ void UITask::msgRead(int msgcount) {
 void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) {
   _msgcount = msgcount;
 
-  ((MsgPreviewScreen *) msg_preview)->addPreview(path_len, from_name, text);
-  setCurrScreen(msg_preview);
+  // In tama mode: trigger mailbox run animation instead of preview screen
+  if (_tama_mode && tamagotchi) {
+    TamagotchiScreen* tama = (TamagotchiScreen*)tamagotchi;
+    tama->onNewMessage(from_name, text);
+    setCurrScreen(tamagotchi);  // stay on tama screen
+  } else {
+    ((MsgPreviewScreen *) msg_preview)->addPreview(path_len, from_name, text);
+    setCurrScreen(msg_preview);
+  }
 
   if (_display != NULL) {
     if (!_display->isOn() && !hasConnection()) {
@@ -677,6 +718,14 @@ void UITask::userLedHandler() {
 void UITask::setCurrScreen(UIScreen* c) {
   curr = c;
   _next_refresh = 100;
+}
+
+void UITask::toggleTamagotchi() {
+  _tama_mode = !_tama_mode;
+  // If currently on tama or home, switch to the other
+  if (curr == tamagotchi || curr == home) {
+    setCurrScreen(_tama_mode ? tamagotchi : home);
+  }
 }
 
 /*
@@ -717,26 +766,138 @@ bool UITask::isButtonPressed() const {
 void UITask::loop() {
   char c = 0;
 #if UI_HAS_JOYSTICK
+  // If display is off, any pressed button should wake it (consume event)
+  if (_display != NULL && !_display->isOn()) {
+    if (user_btn.isPressed() || joystick_left.isPressed() || joystick_right.isPressed() || back_btn.isPressed()) {
+      _display->turnOn();
+      _auto_off = millis() + AUTO_OFF_MILLIS;
+      _display_woke_at = millis();
+      _next_refresh = 0;
+      return;
+    }
+  }
+#endif
+#if UI_HAS_JOYSTICK
   int ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
+    if (_tama_mode && _tama_jump_hold_sent) {
+      _tama_jump_hold_sent = false;
+      c = 0;
+    } else {
+      c = checkDisplayOn(KEY_ENTER);
+    }
+  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
+    // long-press start/hold recorded below; still allow CLI in early boot
+    c = _tama_mode ? 0 : handleLongPress(KEY_ENTER);
+  }
+  // use non-repeating check and implement faster manual repeat polling below
+  ev = joystick_left.check(false);
+  if (ev == BUTTON_EVENT_CLICK) {
+    if (_suppress_left_click) {
+      _suppress_left_click = false;
+      c = 0;
+    } else {
+      c = checkDisplayOn(KEY_LEFT);
+    }
+#ifdef PIN_BUZZER
+    if (_tama_mode && c && !buzzer.isPlaying()) buzzer.play(TAMA_BUZZER_WALK);
+#endif
+  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
+    c = _tama_mode ? checkDisplayOn(KEY_LEFT) : handleLongPress(KEY_LEFT);
+  }
+  ev = joystick_right.check(false);
+  if (ev == BUTTON_EVENT_CLICK) {
+    if (_suppress_right_click) {
+      _suppress_right_click = false;
+      c = 0;
+    } else {
+      c = checkDisplayOn(KEY_RIGHT);
+    }
+#ifdef PIN_BUZZER
+    if (_tama_mode && c && !buzzer.isPlaying()) buzzer.play(TAMA_BUZZER_WALK);
+#endif
+  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
+    c = _tama_mode ? checkDisplayOn(KEY_RIGHT) : handleLongPress(KEY_RIGHT);
+  }
+
+  if (joystick_left.isPressed()) {
+    if (_left_hold_start == 0) {
+      _left_hold_start = millis();
+      _left_repeat_at = 0;
+    } else if (_tama_mode && millis() - _left_hold_start >= TAMA_WALK_HOLD_MILLIS && millis() >= _left_repeat_at) {
+      c = checkDisplayOn(KEY_LEFT);
+      if (c != 0) {
+        _suppress_left_click = true;
+        _left_repeat_at = millis() + _walk_repeat_interval;
+#ifdef PIN_BUZZER
+        if (!buzzer.isPlaying()) buzzer.play(TAMA_BUZZER_WALK);
+#endif
+      }
+    }
+  } else {
+    _left_hold_start = 0;
+    _left_repeat_at = 0;
+  }
+
+  if (joystick_right.isPressed()) {
+    if (_right_hold_start == 0) {
+      _right_hold_start = millis();
+      _right_repeat_at = 0;
+    } else if (_tama_mode && millis() - _right_hold_start >= TAMA_WALK_HOLD_MILLIS && millis() >= _right_repeat_at) {
+      c = checkDisplayOn(KEY_RIGHT);
+      if (c != 0) {
+        _suppress_right_click = true;
+        _right_repeat_at = millis() + _walk_repeat_interval;
+#ifdef PIN_BUZZER
+        if (!buzzer.isPlaying()) buzzer.play(TAMA_BUZZER_WALK);
+#endif
+      }
+    }
+  } else {
+    _right_hold_start = 0;
+    _right_repeat_at = 0;
+  }
+
+  // encoder press charge tracking (for higher jumps)
+  bool cur_pressed = user_btn.isPressed();
+  if (cur_pressed && !_encoder_was_pressed) {
+    _encoder_press_start = millis();
+    _encoder_was_pressed = true;
+    _tama_jump_hold_sent = false;
+  } else if (_tama_mode && cur_pressed && _encoder_was_pressed && !_tama_jump_hold_sent &&
+             millis() - _encoder_press_start >= TAMA_JUMP_HOLD_MILLIS) {
     c = checkDisplayOn(KEY_ENTER);
-  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
-    c = handleLongPress(KEY_ENTER);  // REVISIT: could be mapped to different key code
-  }
-  ev = joystick_left.check();
-  if (ev == BUTTON_EVENT_CLICK) {
-    c = checkDisplayOn(KEY_LEFT);
-  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
-    c = handleLongPress(KEY_LEFT);
-  }
-  ev = joystick_right.check();
-  if (ev == BUTTON_EVENT_CLICK) {
-    c = checkDisplayOn(KEY_RIGHT);
-  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
-    c = handleLongPress(KEY_RIGHT);
+    _tama_jump_hold_sent = (c != 0);
+  } else if (!cur_pressed && _encoder_was_pressed) {
+    _last_encoder_press_ms = millis() - _encoder_press_start; // cache for handleInput
+    _encoder_was_pressed = false;
   }
   ev = back_btn.check();
-  if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
+  if (ev == BUTTON_EVENT_CLICK) {
+    if (millis() - _display_woke_at < 500) {
+      // Just woke up, ignore this click
+    } else {
+      bool handled = false;
+      if (curr != NULL) handled = curr->handleInput(KEY_PREV);
+      if (handled) {
+        _auto_off = millis() + AUTO_OFF_MILLIS;
+        _next_refresh = 0;
+      } else if (_display != NULL) {
+        if (!_display->isOn()) {
+          _display->turnOn();
+          _auto_off = millis() + AUTO_OFF_MILLIS;
+          _next_refresh = 0;
+        } else {
+          _display->turnOff();
+        }
+      }
+      c = 0;
+    }
+  } else if (ev == BUTTON_EVENT_LONG_PRESS) {
+    // Long press: toggle between Tamagotchi and legacy MeshCore
+    toggleTamagotchi();
+    c = 0;  // consumed
+  } else if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
     c = handleTripleClick(KEY_SELECT);
   }
 #elif defined(PIN_USER_BTN)
@@ -798,13 +959,35 @@ void UITask::loop() {
       int delay_millis = curr->render(*_display);
       if (millis() < _alert_expiry) {  // render alert popup
         _display->setTextSize(1);
-        int y = _display->height() / 3;
-        int p = _display->height() / 32;
+        int x = 8;
+        int w = _display->width() - 16;
+        char alert_buf[sizeof(_alert)];
+        _display->translateUTF8ToBlocks(alert_buf, _alert, sizeof(alert_buf));
+        bool is_single_line = _display->getTextWidth(alert_buf) <= (w - 12);
+        int h = is_single_line ? 22 : 32;
+        int y = is_single_line ? 23 : 16;
+
+        // Dark filled rounded rect (r=3 staircase) — clears BG / provides 2px dark outer ring
         _display->setColor(DisplayDriver::DARK);
-        _display->fillRect(p, y, _display->width() - p*2, y);
-        _display->setColor(DisplayDriver::LIGHT);  // draw box border
-        _display->drawRect(p, y, _display->width() - p*2, y);
-        _display->drawTextCentered(_display->width() / 2, y + p*3, _alert);
+        _display->fillRect(x+3, y,     w-6, 1);
+        _display->fillRect(x+1, y+1,   w-2, 1);
+        _display->fillRect(x,   y+2,   w,   h-4);
+        _display->fillRect(x+1, y+h-2, w-2, 1);
+        _display->fillRect(x+3, y+h-1, w-6, 1);
+        // 1px LIGHT border ring at 2px inset (r≈1)
+        _display->setColor(DisplayDriver::LIGHT);
+        _display->fillRect(x+3,   y+2,   w-6, 1);   // top
+        _display->fillRect(x+2,   y+3,   1,   h-6); // left
+        _display->fillRect(x+w-3, y+3,   1,   h-6); // right
+        _display->fillRect(x+3,   y+h-3, w-6, 1);   // bottom
+        // Text: LIGHT on dark background
+        _display->setColor(DisplayDriver::LIGHT);
+        if (is_single_line) {
+          _display->drawTextCentered(_display->width() / 2, y + (h - 8) / 2, alert_buf);
+        } else {
+          _display->setCursor(x + 5, y + 5);
+          _display->printWordWrap(alert_buf, w - 10);
+        }
         _next_refresh = _alert_expiry;   // will need refresh when alert is dismissed
       } else {
         _next_refresh = millis() + delay_millis;
@@ -858,6 +1041,11 @@ char UITask::checkDisplayOn(char c) {
     _next_refresh = 0;  // trigger refresh
   }
   return c;
+}
+
+unsigned long UITask::getEncoderPressDuration() {
+  if (_encoder_was_pressed) return millis() - _encoder_press_start;
+  return _last_encoder_press_ms;  // cached value after button release
 }
 
 char UITask::handleLongPress(char c) {

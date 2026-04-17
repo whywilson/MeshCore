@@ -69,6 +69,48 @@ void SSD1306Display::print(const char* str) {
   display.print(str);
 }
 
+void SSD1306Display::printWordWrap(const char* str, int max_width) {
+  int start_x = display.getCursorX();
+  const int line_h = 8;  // text size 1 = 8px tall
+  char word[80];
+  const char* p = str;
+  bool at_line_start = true;
+
+  while (*p) {
+    if (*p == '\n') {
+      display.setCursor(start_x, display.getCursorY() + line_h);
+      at_line_start = true;
+      p++;
+      continue;
+    }
+    // skip leading spaces when at start of a wrapped line
+    if (*p == ' ' && at_line_start) { p++; continue; }
+
+    // collect next word (non-space run)
+    const char* w0 = p;
+    while (*p && *p != ' ' && *p != '\n') p++;
+    int wlen = (int)(p - w0);
+    if (wlen >= (int)sizeof(word)) wlen = (int)sizeof(word) - 1;
+    memcpy(word, w0, wlen); word[wlen] = 0;
+
+    int cx = display.getCursorX();
+    int word_w = getTextWidth(word);
+    int space_w = at_line_start ? 0 : getTextWidth(" ");
+
+    if (!at_line_start && (cx - start_x) + space_w + word_w > max_width) {
+      // wrap to next line
+      display.setCursor(start_x, display.getCursorY() + line_h);
+      display.print(word);
+    } else {
+      if (!at_line_start) display.print(" ");
+      display.print(word);
+    }
+    at_line_start = false;
+
+    while (*p == ' ') p++;
+  }
+}
+
 void SSD1306Display::fillRect(int x, int y, int w, int h) {
   display.fillRect(x, y, w, h, _color);
 }

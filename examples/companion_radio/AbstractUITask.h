@@ -19,7 +19,8 @@ enum class UIEventType {
     channelMessage,
     roomMessage,
     newContactMessage,
-    ack
+    ack,
+    newHandshake   // new node discovered on mesh (tamagotchi wave trigger)
 };
 
 class AbstractUITask {

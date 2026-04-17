@@ -353,6 +353,11 @@ void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path
 #endif
   }
 
+  // Always notify tamagotchi of handshake regardless of app connection
+#ifdef DISPLAY_CLASS
+  if (_ui && is_new) _ui->notify(UIEventType::newHandshake);
+#endif
+
   // add inbound-path to mem cache
   if (path && mesh::Packet::isValidPathLen(path_len)) {  // check path is valid
     AdvertPath* p = advert_paths;

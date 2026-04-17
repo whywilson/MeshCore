@@ -31,7 +31,7 @@ class UITask : public AbstractUITask {
 #ifdef PIN_VIBRATION
   GenericVibration vibration;
 #endif
-  unsigned long _next_refresh, _auto_off;
+  unsigned long _next_refresh, _auto_off, _display_woke_at = 0;
   NodePrefs* _node_prefs;
   char _alert[80];
   unsigned long _alert_expiry;
@@ -51,7 +51,23 @@ class UITask : public AbstractUITask {
   UIScreen* splash;
   UIScreen* home;
   UIScreen* msg_preview;
+  UIScreen* tamagotchi;
   UIScreen* curr;
+
+  bool _tama_mode;   // true = tamagotchi is the default screen (vs legacy home)
+  unsigned long _walk_repeat_timer = 0;
+  const unsigned long _walk_repeat_interval = 80; // ms between repeated walk steps while held
+  unsigned long _left_hold_start = 0;
+  unsigned long _right_hold_start = 0;
+  unsigned long _left_repeat_at = 0;
+  unsigned long _right_repeat_at = 0;
+  bool _suppress_left_click = false;
+  bool _suppress_right_click = false;
+  // encoder press charge tracking
+  unsigned long _encoder_press_start = 0;
+  bool _encoder_was_pressed = false;
+  unsigned long _last_encoder_press_ms = 0;
+  bool _tama_jump_hold_sent = false;
 
   void userLedHandler();
 
@@ -69,11 +85,16 @@ public:
     next_batt_chck = _next_refresh = 0;
     ui_started_at = 0;
     curr = NULL;
+    tamagotchi = NULL;
+    _tama_mode = true;
   }
   void begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs);
 
-  void gotoHomeScreen() { setCurrScreen(home); }
+  void gotoHomeScreen() { setCurrScreen(_tama_mode ? tamagotchi : home); }
+  void gotoLegacyHomeScreen() { setCurrScreen(home); }
+  void toggleTamagotchi();   // switch between tama and legacy home
   void showAlert(const char* text, int duration_millis);
+  unsigned long getEncoderPressDuration();
   int  getMsgCount() const { return _msgcount; }
   bool hasDisplay() const { return _display != NULL; }
   bool isButtonPressed() const;
@@ -83,6 +104,12 @@ public:
     return buzzer.isQuiet();
 #else
     return true;
+#endif
+  }
+
+  void playBuzzer(const char* score) {
+#ifdef PIN_BUZZER
+    if (!buzzer.isQuiet()) buzzer.play(score);
 #endif
   }
 
