@@ -1279,6 +1279,14 @@ bool MyMesh::handleLocalWpmCommand(uint8_t channel_idx, const char *text) {
   _prefs.cw_wpm = (uint8_t)val;
   savePrefs();
 
+  // Play a short CW test tone at the new speed ("HI" = .... ..)
+  if (_ui) {
+    char testBuf[256];
+    if (buildMorseRtttl("HI", testBuf, sizeof(testBuf), _prefs.cw_wpm)) {
+      _ui->playRingtone(testBuf);
+    }
+  }
+
   char response[64];
   snprintf(response, sizeof(response), "CW speed set to %u WPM", _prefs.cw_wpm);
   sendLocalChannelSystemMessage(channel_idx, response);
