@@ -696,11 +696,16 @@ static const char *getMorseCode(char c) {
 // Returns true if at least one dot/dash was emitted
 // dot  = 1 unit beep, dash ≈ 4 units (slightly longer for clarity)
 // intra-element gap = 1 unit silence, inter-letter gap ≈ 3 units, word gap ≈ 7 units
-static bool buildMorseRtttl(const char *message, char *rtttl_out, size_t max_len) {
+static bool buildMorseRtttl(const char *message, char *rtttl_out, size_t max_len, uint8_t wpm = 15) {
   if (!message || !rtttl_out || max_len == 0) return false;
+  if (wpm < 5) wpm = 5;
+  if (wpm > 60) wpm = 60;
+  // BPM for RTTTL 8th note = PARIS dit duration: bpm = 25 * wpm
+  int bpm = 25 * wpm;
 
   size_t pos = 0;
-  const char *header = "CW:d=8,o=5,b=480:";
+  char header[32];
+  snprintf(header, sizeof(header), "CW:d=8,o=5,b=%d:", bpm);
   size_t hdr_len = strlen(header);
   if (hdr_len >= max_len) {
     rtttl_out[0] = 0;
@@ -1244,6 +1249,38 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char *text) {
       snprintf(response, sizeof(response), "Channel buzzer set to %s", describeNotifyMode(effective_mode));
     }
   }
+  sendLocalChannelSystemMessage(channel_idx, response);
+  return true;
+}
+
+bool MyMesh::handleLocalWpmCommand(uint8_t channel_idx, const char *text) {
+  if (!text || strncmp(text, "/wpm", 4) != 0) return false;
+
+  const char *args = text + 4;
+  args = skipWhitespace(args);
+
+  if (*args == 0) {
+    char response[64];
+    snprintf(response, sizeof(response), "CW speed: %u WPM (range 5-60)\nUsage: /wpm [5-60]",
+             _prefs.cw_wpm ? _prefs.cw_wpm : 15);
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  char *end = nullptr;
+  long val = strtol(args, &end, 10);
+  if (end == args || val < 5 || val > 60) {
+    char response[64];
+    snprintf(response, sizeof(response), "Invalid WPM. Use a value between 5 and 60.");
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+
+  _prefs.cw_wpm = (uint8_t)val;
+  savePrefs();
+
+  char response[64];
+  snprintf(response, sizeof(response), "CW speed set to %u WPM", _prefs.cw_wpm);
   sendLocalChannelSystemMessage(channel_idx, response);
   return true;
 }
@@ -1888,6 +1925,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   const char *cmd = skipWhitespace(text);
 #ifdef HEADLESS_CANNED_MESSAGES
   if (handleLocalBuzzerCommand(channel_idx, cmd)) return true;
+  if (handleLocalWpmCommand(channel_idx, cmd)) return true;
 #ifdef ENABLE_FLIP_MUTE
   if (handleLocalFlipmuteCommand(channel_idx, cmd)) return true;
 #endif
@@ -2200,7 +2238,7 @@ void MyMesh::maybePlayRingtone(const ContactInfo *from, const char *text, uint8_
 
     // Larger buffer reduces premature truncation for long CW strings.
     char cwBuffer[1536];
-    bool has_morse = buildMorseRtttl(payload, cwBuffer, sizeof(cwBuffer));
+    bool has_morse = buildMorseRtttl(payload, cwBuffer, sizeof(cwBuffer), _prefs.cw_wpm ? _prefs.cw_wpm : 15);
     if (!has_morse) {
       // If the text cannot be converted to Morse (e.g. only non-ASCII chars),
       // still emit a short alert so DMs are not silent in CW mode.
@@ -2618,6 +2656,7 @@ void MyMesh::begin(bool has_display) {
   _prefs.tx_power_dbm = constrain(_prefs.tx_power_dbm, -9, MAX_LORA_TX_POWER);
   _prefs.gps_enabled = constrain(_prefs.gps_enabled, 0, 1);  // Ensure boolean 0 or 1
   _prefs.gps_interval = constrain(_prefs.gps_interval, 0, 86400);  // Max 24 hours
+  if (_prefs.cw_wpm < 5 || _prefs.cw_wpm > 60) _prefs.cw_wpm = 15;  // CW speed default 15 WPM
 
 #ifdef BLE_PIN_CODE // 123456 by default
   if (_prefs.ble_pin == 0) {
