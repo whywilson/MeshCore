@@ -17,9 +17,6 @@ void genericBuzzer::begin(bool suppress_startup) {
         }
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_BUZZER, LOW); // need to pull low by default to avoid extreme power draw
-        if (!suppress_startup) {
-            startup();
-        }
 }
 
 void genericBuzzer::play(const char *melody) {

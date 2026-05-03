@@ -8,6 +8,10 @@
 #include <Arduino.h>
 #include <helpers/sensors/LPPDataHelpers.h>
 
+#ifndef LED_STATE_ON
+  #define LED_STATE_ON 1
+#endif
+
 #ifdef PIN_BUZZER
   #include <helpers/ui/buzzer.h>
 #endif
@@ -107,6 +111,14 @@ public:
   int  getMsgCount() const { return _msgcount; }
   bool hasDisplay() const { return _display != NULL; }
   bool isButtonPressed() const;
+
+  bool isBuzzerQuiet() { 
+#ifdef PIN_BUZZER
+    return buzzer.isQuiet();
+#else
+    return true;
+#endif
+  }
 
   void toggleBuzzer();
   bool getGPSState();
