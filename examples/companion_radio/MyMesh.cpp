@@ -1441,27 +1441,6 @@ bool MyMesh::shouldNotifyForPacket(const uint8_t hash[MAX_HASH_SIZE]) {
   return true;
 }
 
-void MyMesh::sendFloodScoped(const ContactInfo &recipient, mesh::Packet *pkt, uint32_t delay_millis) {
-  // TODO: dynamic send_scope, depending on recipient and current 'home' Region
-  if (send_scope.isNull()) {
-    sendFlood(pkt, delay_millis);
-  } else {
-    uint16_t codes[2];
-    codes[0] = send_scope.calcTransportCode(pkt);
-    codes[1] = 0; // REVISIT: set to 'home' Region, for sender/return region?
-    sendFlood(pkt, codes, delay_millis);
-  }
-}
-void MyMesh::sendFloodScoped(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t delay_millis) {
-  // TODO: have per-channel send_scope
-  if (send_scope.isNull()) {
-    sendFlood(pkt, delay_millis);
-  } else {
-    uint16_t codes[2];
-    codes[0] = send_scope.calcTransportCode(pkt);
-    codes[1] = 0; // REVISIT: set to 'home' Region, for sender/return region?
-    sendFlood(pkt, codes, delay_millis);
-  }
 bool MyMesh::allowPacketForward(const mesh::Packet* packet) {
   return _prefs.client_repeat != 0;
 }
