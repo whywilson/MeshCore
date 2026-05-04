@@ -1279,6 +1279,10 @@ bool MyMesh::handleLocalWpmCommand(uint8_t channel_idx, const char *text) {
   _prefs.cw_wpm = (uint8_t)val;
   savePrefs();
 
+  // Reset CW dedup so the next message rings with the new speed
+  _last_cw_group_valid = false;
+  memset(_last_cw_group_hash, 0, sizeof(_last_cw_group_hash));
+
   // Play a short CW test tone at the new speed ("HI" = .... ..)
   if (_ui) {
     char testBuf[256];
