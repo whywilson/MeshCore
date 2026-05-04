@@ -1951,7 +1951,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
-    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/rtttl [list|<rtttl>]\n/tap "
+    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/wpm [5-60]\n/rtttl [list|<rtttl>]\n/tap "
                        "[here]\n\n/flipmute on|off";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
