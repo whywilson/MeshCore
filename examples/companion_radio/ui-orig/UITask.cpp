@@ -443,7 +443,14 @@ void UITask::loop() {
 #ifdef PIN_BUZZER
   if (buzzer.isPlaying())  {
     buzzer.loop();
+    // Watchdog: if playing for more than 60 s something is stuck (e.g. corrupted buffer).
+    // Force-stop so the queue can drain again.
+    if (millis() - _buzzer_play_start_ms > 60000UL) {
+      Serial.println("[Buzzer] watchdog: stuck playing >60s, force stop");
+      buzzer.stop();
+    }
   } else {
+    _buzzer_play_start_ms = millis();  // reset watchdog whenever buzzer is idle
     // Drain CW queue when buzzer is free.
     if (_cwCount > 0) {
       buzzer.play(_cwQueue[_cwHead]);
@@ -1195,7 +1202,12 @@ void UITask::playRingtone(const char* melody) {
 #if defined(PIN_BUZZER)
   // In CW mode, always enqueue so playback path is unified and not interrupted mid-stream.
   if (_node_prefs && _node_prefs->notify_mode == NOTIFY_MODE_CW && melody) {
-    if (_cwCount < kCwQueueCapacity) {
+    // Reserve one extra slot for the slot currently being played by RTTTL (its memory is still
+    // live even though it has been dequeued from _cwCount).  Without this guard, a 5th rapid
+    // message wraps _cwTail back to the playing slot and overwrites it mid-stream, causing the
+    // RTTTL pointer to read garbage and the playing flag to get stuck forever.
+    uint8_t effective_used = _cwCount + (buzzer.isPlaying() ? 1 : 0);
+    if (effective_used < kCwQueueCapacity) {
       StrHelper::strncpy(_cwQueue[_cwTail], melody, kCwMaxLen);
       _cwTail = (_cwTail + 1) % kCwQueueCapacity;
       ++_cwCount;

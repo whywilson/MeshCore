@@ -30,6 +30,7 @@ class UITask : public AbstractUITask {
   uint8_t _cwHead = 0;
   uint8_t _cwTail = 0;
   uint8_t _cwCount = 0;
+  uint32_t _buzzer_play_start_ms = 0;  // watchdog: tracks when current play started
 #endif
   unsigned long _next_refresh, _auto_off;
   NodePrefs* _node_prefs;
