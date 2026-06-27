@@ -58,7 +58,7 @@ public:
   void loadPrefs(NodePrefs& prefs, double& node_lat, double& node_lon);
   void savePrefs(const NodePrefs& prefs, double node_lat, double node_lon);
   void loadContacts(DataStoreHost* host);
-  void saveContacts(DataStoreHost* host);
+  void saveContacts(DataStoreHost* host, bool (*filter)(const ContactInfo& c) = NULL);
   void loadChannels(DataStoreHost* host);
   void saveChannels(DataStoreHost* host);
   bool loadCannedMessages(char dest[][canned::kMaxMessageLen], size_t max_count, size_t& out_count);

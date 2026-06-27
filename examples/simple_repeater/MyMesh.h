@@ -69,11 +69,11 @@ struct NeighbourInfo {
 };
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "19 Apr 2026"
+  #define FIRMWARE_BUILD_DATE   "6 Jun 2026"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.15.0"
+  #define FIRMWARE_VERSION   "v1.16.0"
 #endif
 
 #define FIRMWARE_ROLE "repeater"
@@ -149,6 +149,9 @@ protected:
 
   int getInterferenceThreshold() const override {
     return _prefs.interference_threshold;
+  }
+  bool getCADEnabled() const override {
+    return _prefs.cad_enabled;
   }
   int getAGCResetInterval() const override {
     return ((int)_prefs.agc_reset_interval) * 4000;   // milliseconds
@@ -249,7 +252,6 @@ public:
   // To check if there is pending work
   bool hasPendingWork() const;
 
-#if defined(USE_SX1262) || defined(USE_SX1268)
-  void setRxBoostedGain(bool enable) override;
-#endif
+  bool setRxBoostedGain(bool enable) override;
+
 };
