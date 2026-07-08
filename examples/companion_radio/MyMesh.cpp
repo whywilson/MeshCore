@@ -26,7 +26,7 @@
 #define CMD_REBOOT                        19
 #define CMD_GET_BATT_AND_STORAGE          20 // was CMD_GET_BATTERY_VOLTAGE
 #define CMD_SET_TUNING_PARAMS             21
-#define CMD_DEVICE_QEURY                  22
+#define CMD_DEVICE_QUERY                  22
 #define CMD_EXPORT_PRIVATE_KEY            23
 #define CMD_IMPORT_PRIVATE_KEY            24
 #define CMD_SEND_RAW_DATA                 25
@@ -1965,10 +1965,77 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
     sendTapStatusToApp(channel_idx, response);
     return true;
   }
+  // /lobat: low-battery auto-notify
+  if (strncmp(cmd, "/lobat", 6) == 0) {
+    const char *args = skipWhitespace(cmd + 6);
+    if (*args && matchesToken(args, "here")) {
+      _lobat_channel_idx = channel_idx;
+      initLobat();
+    }
+    char response[128];
+    snprintf(response, sizeof(response), "Low-battery alert: %s", describeLobatStatus());
+    sendLocalChannelSystemMessage(channel_idx, response);
+    return true;
+  }
+  // /mark: geofence
+  if (strncmp(cmd, "/mark", 5) == 0) {
+    const char *args = skipWhitespace(cmd + 5);
+    if (*args == 0) {
+      // No args: render the ASCII map
+      char map_buf[512];
+      buildMarkMap(sensors.node_lat, sensors.node_lon, map_buf, sizeof(map_buf));
+      sendLocalChannelSystemMessage(channel_idx, map_buf);
+      return true;
+    }
+    if (matchesToken(args, "on")) {
+      // Enable fence (starts GPS if needed)
+      setMarkEnabled(true);
+      char response[96];
+      snprintf(response, sizeof(response), "Geofence: %s", describeMarkStatus());
+      sendLocalChannelSystemMessage(channel_idx, response);
+      return true;
+    }
+    if (matchesToken(args, "off")) {
+      setMarkEnabled(false);
+      sendLocalChannelSystemMessage(channel_idx, "Geofence disabled");
+      return true;
+    }
+    if (matchesToken(args, "clear")) {
+      clearMarkPoints();
+      sendLocalChannelSystemMessage(channel_idx, "Geofence points cleared");
+      return true;
+    }
+    // Try to parse as a coordinate pair "lat,lon" or "lat, lon"
+    {
+      double lat, lon;
+      int parsed = 0;
+      // Use sscanf to parse "lat,lon" or "lat, lon"
+      if (sscanf(args, "%lf,%lf", &lat, &lon) >= 2 ||
+          sscanf(args, "%lf ,%lf", &lat, &lon) >= 2) {
+        if (addMarkPoint(lat, lon)) {
+          char response[96];
+          snprintf(response, sizeof(response), "Mark point %u added: %.4f, %.4f (total %u)",
+                   (unsigned)_mark_point_count, lat, lon, (unsigned)_mark_point_count);
+          sendLocalChannelSystemMessage(channel_idx, response);
+        } else {
+          char response[64];
+          snprintf(response, sizeof(response), "Mark full or invalid (max %u points)", (unsigned)kMarkMaxPoints);
+          sendLocalChannelSystemMessage(channel_idx, response);
+        }
+        return true;
+      }
+    }
+    sendLocalChannelSystemMessage(channel_idx, "Usage: /mark <lat,lon> | on | off | clear");
+    return true;
+  }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
-    const char *help = "Commands: \n/msg [list|set]\n/buz rtttl|cw|off [--global|--g]\n/wpm [5-60]\n/rtttl [list|<rtttl>]\n/tap "
-                       "[here]\n\n/flipmute on|off";
+    const char *help =
+      "Basic:\n"
+      "/msg /buz /wpm /rtttl\n"
+      "Advanced:\n"
+      "/tap /lobat /mark /flipmute\n"
+      "/mark <lat,lon>|on|off|clr";
     sendLocalChannelSystemMessage(channel_idx, help);
     return true;
   }
@@ -2629,6 +2696,294 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
 #endif
 }
 
+
+// ---- Geofence (/mark) ----
+
+void MyMesh::initMark() {
+  _mark_enabled = false;
+  _mark_outside = false;
+  _mark_point_count = 0;
+  _mark_next_check_ms = 0;
+  memset(_mark_lats, 0, sizeof(_mark_lats));
+  memset(_mark_lons, 0, sizeof(_mark_lons));
+}
+
+bool MyMesh::addMarkPoint(double lat, double lon) {
+  if (_mark_point_count >= kMarkMaxPoints) return false;
+  // Reject obviously invalid coordinates
+  if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return false;
+  _mark_lats[_mark_point_count] = lat;
+  _mark_lons[_mark_point_count] = lon;
+  _mark_point_count++;
+  return true;
+}
+
+void MyMesh::clearMarkPoints() {
+  _mark_point_count = 0;
+  _mark_outside = false;
+  _mark_next_check_ms = 0;
+  memset(_mark_lats, 0, sizeof(_mark_lats));
+  memset(_mark_lons, 0, sizeof(_mark_lons));
+}
+
+void MyMesh::setMarkEnabled(bool on) {
+  _mark_enabled = on;
+  if (on) {
+    _mark_outside = false;
+    _mark_next_check_ms = millis() + 10000; // first check in 10s (allow GPS fix)
+    // Start GPS if available
+    if (sensors.node_lat == 0.0 && sensors.node_lon == 0.0) {
+      sensors.setSettingValue("gps", "1");
+    }
+  } else {
+    _mark_outside = false;
+    _mark_next_check_ms = 0;
+  }
+}
+
+// Ray-casting algorithm: is point inside polygon?
+bool MyMesh::isPointInsideMark(double lat, double lon) const {
+  if (_mark_point_count < 3) return false; // need a polygon
+  bool inside = false;
+  uint8_t j = _mark_point_count - 1;
+  for (uint8_t i = 0; i < _mark_point_count; i++) {
+    if ((_mark_lons[i] > lon) != (_mark_lons[j] > lon) &&
+        (lat < (_mark_lats[j] - _mark_lats[i]) * (lon - _mark_lons[i]) / (_mark_lons[j] - _mark_lons[i]) + _mark_lats[i])) {
+      inside = !inside;
+    }
+    j = i;
+  }
+  return inside;
+}
+
+void MyMesh::nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_t& out_idx1) const {
+  out_idx0 = 0;
+  out_idx1 = (_mark_point_count > 1) ? 1 : 0;
+  double best0 = 1e99, best1 = 1e99;
+  for (uint8_t i = 0; i < _mark_point_count; i++) {
+    double dlat = _mark_lats[i] - lat;
+    double dlon = _mark_lons[i] - lon;
+    double dist = dlat * dlat + dlon * dlon; // squared, fine for ordering nearby points
+    if (dist < best0) {
+      best1 = best0; out_idx1 = out_idx0;
+      best0 = dist;  out_idx0 = i;
+    } else if (dist < best1) {
+      best1 = dist; out_idx1 = i;
+    }
+  }
+}
+
+void MyMesh::buildMarkMap(double lat, double lon, char* out, size_t out_size) const {
+  if (_mark_point_count < 3) {
+    snprintf(out, out_size, "Geofence: need at least 3 points (have %u)", (unsigned)_mark_point_count);
+    return;
+  }
+  // Build a simple 7x7 character grid centred on the device position.
+  // Each cell spans roughly (span_lat/GRID) degrees in each direction.
+  double min_lat = 90, max_lat = -90, min_lon = 180, max_lon = -180;
+  for (uint8_t i = 0; i < _mark_point_count; i++) {
+    if (_mark_lats[i] < min_lat) min_lat = _mark_lats[i];
+    if (_mark_lats[i] > max_lat) max_lat = _mark_lats[i];
+    if (_mark_lons[i] < min_lon) min_lon = _mark_lons[i];
+    if (_mark_lons[i] > max_lon) max_lon = _mark_lons[i];
+  }
+  // Add device position to bounds so it's always visible
+  if (lat < min_lat) min_lat = lat;
+  if (lat > max_lat) max_lat = lat;
+  if (lon < min_lon) min_lon = lon;
+  if (lon > max_lon) max_lon = lon;
+
+  // Expand a bit for padding
+  double pad_lat = (max_lat - min_lat) * 0.15;
+  double pad_lon = (max_lon - min_lon) * 0.15;
+  if (pad_lat < 0.0001) pad_lat = 0.0001;
+  if (pad_lon < 0.0001) pad_lon = 0.0001;
+  min_lat -= pad_lat; max_lat += pad_lat;
+  min_lon -= pad_lon; max_lon += pad_lon;
+
+  const int GRID = 7;
+  double step_lat = (max_lat - min_lat) / (GRID - 1);
+  double step_lon = (max_lon - min_lon) / (GRID - 1);
+  if (step_lat == 0) step_lat = 1e-6;
+  if (step_lon == 0) step_lon = 1e-6;
+
+  char buf[256];
+  int pos = 0;
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "Geofence %u pts:\n", (unsigned)_mark_point_count);
+
+  // For each fence segment, mark which grid cells it passes through
+  // We'll just mark the vertices on the grid
+  bool vertex_cell[GRID][GRID];
+  bool inside_cell[GRID][GRID];
+  memset(vertex_cell, 0, sizeof(vertex_cell));
+  memset(inside_cell, 0, sizeof(inside_cell));
+
+  // Mark vertices
+  for (uint8_t vi = 0; vi < _mark_point_count; vi++) {
+    int gx = (int)round((_mark_lons[vi] - min_lon) / step_lon);
+    int gy = (int)round((_mark_lats[vi] - min_lat) / step_lat);
+    if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID) {
+      vertex_cell[gy][gx] = true;
+    }
+  }
+
+  // Mark each grid cell as inside/outside polygon
+  for (int y = 0; y < GRID; y++) {
+    double cell_lat = min_lat + y * step_lat;
+    for (int x = 0; x < GRID; x++) {
+      double cell_lon = min_lon + x * step_lon;
+      inside_cell[y][x] = isPointInsideMark(cell_lat, cell_lon);
+    }
+  }
+
+  // Device position grid cell
+  int dx = (int)round((lon - min_lon) / step_lon);
+  int dy = (int)round((lat - min_lat) / step_lat);
+  bool dev_inside = isPointInsideMark(lat, lon);
+
+  // Draw grid (top row first = max lat)
+  for (int y = GRID - 1; y >= 0; y--) {
+    for (int x = 0; x < GRID; x++) {
+      if (x == dx && y == dy) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", dev_inside ? "★" : "☆");
+      } else if (vertex_cell[y][x]) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "■");
+      } else if (inside_cell[y][x]) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, ".");
+      } else {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, " ");
+      }
+    }
+    if (y == GRID - 1) pos += snprintf(buf + pos, sizeof(buf) - pos, " N");
+    if (y == dy)      pos += snprintf(buf + pos, sizeof(buf) - pos, " ←%.4fN", lat);
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
+  }
+  // Longitude labels
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "W← %.4fE →\n", lon);
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "Dev: %s (%.4f, %.4f)", dev_inside ? "INSIDE" : "OUTSIDE", lat, lon);
+
+  snprintf(out, out_size, "%s", buf);
+}
+
+void MyMesh::checkMark() {
+  if (!_mark_enabled || _mark_point_count < 3) return;
+  if (_mark_next_check_ms == 0 || !millisHasNowPassed(_mark_next_check_ms)) return;
+
+  double lat = sensors.node_lat;
+  double lon = sensors.node_lon;
+  if (lat == 0.0 && lon == 0.0) {
+    // No GPS fix yet, try again later
+    _mark_next_check_ms = millis() + 30000;
+    return;
+  }
+
+  bool inside = isPointInsideMark(lat, lon);
+  if (inside) {
+    _mark_outside = false;
+    _mark_next_check_ms = millis() + kMarkCheckIntervalMs;
+    return;
+  }
+
+  // Outside fence: send alert (but only if we transitioned from inside or first time)
+  if (!_mark_outside) {
+    _mark_outside = true;
+    sendMarkAlert();
+  }
+  _mark_next_check_ms = millis() + kMarkCheckIntervalMs;
+}
+
+void MyMesh::sendMarkAlert() {
+  double lat = sensors.node_lat;
+  double lon = sensors.node_lon;
+
+  // Find two nearest fence points
+  uint8_t near0, near1;
+  nearestMarkPoints(lat, lon, near0, near1);
+
+  // Build a small ASCII map for the alert
+  char map_buf[384];
+  buildMarkMap(lat, lon, map_buf, sizeof(map_buf));
+
+  // Send via the first channel that has /mark enabled
+  // We'll store the last channel index for this purpose, but for now
+  // send to whichever context triggered it (during checkMark we don't have channel context).
+  // We'll broadcast to channel 0 (Public) by convention.
+  sendLocalChannelSystemMessage(0, map_buf);
+
+  // Also include relative bearing text
+  char rel[128];
+  double dlat0 = _mark_lats[near0] - lat;
+  double dlon0 = _mark_lons[near0] - lon;
+  double dlat1 = _mark_lats[near1] - lat;
+  double dlon1 = _mark_lons[near1] - lon;
+  snprintf(rel, sizeof(rel), "Nearest marks: #%u (%.4f,%.4f) ∆%.5f, #%u (%.4f,%.4f) ∆%.5f",
+           (unsigned)near0, _mark_lats[near0], _mark_lons[near0], dlat0 * dlat0 + dlon0 * dlon0,
+           (unsigned)near1, _mark_lats[near1], _mark_lons[near1], dlat1 * dlat1 + dlon1 * dlon1);
+  sendLocalChannelSystemMessage(0, rel);
+}
+
+const char* MyMesh::describeMarkStatus() const {
+  static char buf[96];
+  if (!_mark_enabled) {
+    snprintf(buf, sizeof(buf), "disabled (%u points stored)", (unsigned)_mark_point_count);
+  } else if (_mark_point_count < 3) {
+    snprintf(buf, sizeof(buf), "enabled but need %u more points", (unsigned)(3 - _mark_point_count));
+  } else {
+    double lat = sensors.node_lat;
+    double lon = sensors.node_lon;
+    bool inside = isPointInsideMark(lat, lon);
+    snprintf(buf, sizeof(buf), "%s (%u pts) dev=%s", _mark_outside ? "ALERT" : "OK",
+             (unsigned)_mark_point_count, inside ? "INSIDE" : "OUTSIDE");
+  }
+  return buf;
+}
+
+// ---- Low-battery auto-notify (/lobat) ----
+
+void MyMesh::initLobat() {
+  _lobat_count = 0;
+  _lobat_next_check_ms = millis() + kLobatCheckIntervalMs;
+}
+
+void MyMesh::sendLobatMessage() {
+  uint16_t mv = board.getBattMilliVolts();
+  // Rough percent: 3.0V = 0%, 4.2V = 100% (typical LiPo)
+  uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
+  char msg[80];
+  snprintf(msg, sizeof(msg), "[Low battery] %u%% (%u mV) -- auto alert %u/%u",
+           pct, mv, (unsigned)_lobat_count + 1, (unsigned)kLobatMaxCount);
+  sendLocalChannelSystemMessage(_lobat_channel_idx, msg);
+  _lobat_count++;
+  _lobat_next_check_ms = millis() + kLobatCheckIntervalMs;
+}
+
+void MyMesh::checkLobat() {
+  if (_lobat_channel_idx == 0xFF) return;           // not armed
+  if (_lobat_count >= kLobatMaxCount) return;        // max alerts reached
+  if (!millisHasNowPassed(_lobat_next_check_ms)) return; // not yet
+
+  uint16_t mv = board.getBattMilliVolts();
+  uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
+
+  if (pct < kLobatThresholdPct) {
+    sendLobatMessage();
+  } else {
+    // Battery recovered above threshold, reset timer and keep watching
+    _lobat_next_check_ms = millis() + kLobatCheckIntervalMs;
+  }
+}
+
+const char* MyMesh::describeLobatStatus() const {
+  if (_lobat_channel_idx == 0xFF) return "not armed. Use /lobat here to arm.";
+  static char buf[80];
+  uint16_t mv = board.getBattMilliVolts();
+  uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
+  snprintf(buf, sizeof(buf), "armed on ch%u, sent %u/%u, batt %u%% (%u mV)",
+           (unsigned)_lobat_channel_idx, (unsigned)_lobat_count, (unsigned)kLobatMaxCount,
+           (unsigned)pct, (unsigned)mv);
+  return buf;
+}
+
 void MyMesh::begin(bool has_display) {
   BaseChatMesh::begin();
 
@@ -2713,6 +3068,9 @@ void MyMesh::begin(bool has_display) {
   loadBuzzerPrefs();
   loadTapTargetPrefs();
 #endif
+
+  initLobat();
+  initMark();
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
@@ -4002,6 +4360,12 @@ void MyMesh::loop() {
     saveContacts();
     dirty_contacts_expiry = 0;
   }
+
+  // Low-battery auto-notify check
+  checkLobat();
+
+  // Geofence check
+  checkMark();
 
 #ifdef DISPLAY_CLASS
   if (_ui) _ui->setHasConnection(_serial->isConnected());

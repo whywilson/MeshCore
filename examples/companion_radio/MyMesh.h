@@ -273,6 +273,28 @@ private:
   bool handleTapCommandForContact(const ContactInfo& contact, const char* text);
 #endif
 
+  // Low-battery auto-notify (/lobat here)
+  void initLobat();
+  void checkLobat();
+  void sendLobatMessage();
+  const char* describeLobatStatus() const;
+
+  // Geofence (/mark)
+  static constexpr uint8_t  kMarkMaxPoints = 12;
+  void initMark();
+  bool addMarkPoint(double lat, double lon);
+  void clearMarkPoints();
+  void setMarkEnabled(bool on);
+  bool isMarkEnabled() const { return _mark_enabled; }
+  bool isPointInsideMark(double lat, double lon) const;
+  const char* describeMarkStatus() const;
+  void checkMark();
+  void sendMarkAlert();
+  // Returns the two nearest fence-point indices (closest, second-closest).
+  void nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_t& out_idx1) const;
+  // Build a 7x7 ASCII art map centered on the device.
+  void buildMarkMap(double lat, double lon, char* out, size_t out_size) const;
+
   bool computePacketHash(const mesh::Packet* pkt, uint8_t out_hash[MAX_HASH_SIZE]) const;
   bool isRecentDuplicate(const uint8_t hash[MAX_HASH_SIZE]);
   bool isDuplicateGroupMessage(const uint8_t hash[MAX_HASH_SIZE]);
@@ -316,6 +338,22 @@ private:
   BuzzerPrefs _buzzerPrefs;
   TapTargetPrefs _tapTarget;
 #endif
+  // Low-battery auto-notify state
+  static constexpr uint32_t kLobatCheckIntervalMs = 180000; // 3 minutes
+  static constexpr uint32_t kLobatThresholdPct   = 80;      // below 20%
+  static constexpr uint8_t  kLobatMaxCount       = 3;       // max 3 alerts
+  uint8_t  _lobat_channel_idx;   // 0xFF = not set, otherwise the target channel
+  uint8_t  _lobat_count;         // sends so far
+  uint32_t _lobat_next_check_ms; // next check timestamp (millis)
+
+  // Geofence (/mark) state
+  static constexpr uint32_t kMarkCheckIntervalMs = 180000; // 3 minutes
+  bool     _mark_enabled;
+  bool     _mark_outside;
+  uint8_t  _mark_point_count;
+  double   _mark_lats[kMarkMaxPoints];
+  double   _mark_lons[kMarkMaxPoints];
+  uint32_t _mark_next_check_ms;
 
   uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
   uint8_t out_frame[MAX_FRAME_SIZE + 1];

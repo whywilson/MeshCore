@@ -4,9 +4,7 @@
 #ifdef PIN_STATUS_LED
 #include <helpers/ui/MorseCodeInput.h>
 #endif
-#ifdef HEADLESS_CANNED_MESSAGES
 #include "../MyMesh.h"
-#endif
 
 #define AUTO_OFF_MILLIS     15000   // 15 seconds
 #define BOOT_SCREEN_MILLIS   3000   // 3 seconds
