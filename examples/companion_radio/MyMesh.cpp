@@ -1971,6 +1971,13 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
     if (*args && matchesToken(args, "here")) {
       _lobat_channel_idx = channel_idx;
       initLobat();
+    } else if (*args) {
+      // /lobat <pct> — set threshold
+      int pct = atoi(args);
+      if (pct >= 1 && pct <= 100) {
+        _lobat_threshold_pct = (uint8_t)pct;
+        _store->saveLobatPrefs(_lobat_threshold_pct);
+      }
     }
     char response[128];
     snprintf(response, sizeof(response), "Low-battery alert: %s", describeLobatStatus());
@@ -1981,10 +1988,24 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
   if (strncmp(cmd, "/mark", 5) == 0) {
     const char *args = skipWhitespace(cmd + 5);
     if (*args == 0) {
-      // No args: render the ASCII map
-      char map_buf[512];
-      buildMarkMap(sensors.node_lat, sensors.node_lon, map_buf, sizeof(map_buf));
-      sendLocalChannelSystemMessage(channel_idx, map_buf);
+      // No args: show status + ASCII map
+      char response[128];
+      snprintf(response, sizeof(response), "Geofence: %s", describeMarkStatus());
+      sendLocalChannelSystemMessage(channel_idx, response);
+      // Also render the ASCII map if GPS has a fix
+      if (sensors.node_lat != 0.0 || sensors.node_lon != 0.0) {
+        char map_buf[512];
+        buildMarkMap(sensors.node_lat, sensors.node_lon, map_buf, sizeof(map_buf));
+        sendLocalChannelSystemMessage(channel_idx, map_buf);
+      }
+      return true;
+    }
+    if (matchesToken(args, "here")) {
+      _mark_channel_idx = channel_idx;
+      char response[96];
+      snprintf(response, sizeof(response), "Geofence alerts will go to this channel (%s)",
+               channel.name[0] ? channel.name : "ch" + channel_idx);
+      sendLocalChannelSystemMessage(channel_idx, response);
       return true;
     }
     if (matchesToken(args, "on")) {
@@ -2008,21 +2029,39 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
     // Try to parse as a coordinate pair "lat,lon" or "lat, lon"
     {
       double lat, lon;
-      int parsed = 0;
-      // Use sscanf to parse "lat,lon" or "lat, lon"
-      if (sscanf(args, "%lf,%lf", &lat, &lon) >= 2 ||
-          sscanf(args, "%lf ,%lf", &lat, &lon) >= 2) {
-        if (addMarkPoint(lat, lon)) {
-          char response[96];
-          snprintf(response, sizeof(response), "Mark point %u added: %.4f, %.4f (total %u)",
-                   (unsigned)_mark_point_count, lat, lon, (unsigned)_mark_point_count);
-          sendLocalChannelSystemMessage(channel_idx, response);
+      // Flexible parse: skip whitespace, allow ASCII or fullwidth comma
+      const char *p = args;
+      while (*p == ' ' || *p == '	') p++;
+      char *end = NULL;
+      lat = strtod(p, &end);
+      if (end != p && *end != 0) {
+        p = end;
+        while (*p == ' ' || *p == '	') p++;
+        // Accept ASCII comma, Chinese comma (0xEF 0xBC 0x8C), or semicolon
+        if (*p == ',' || *p == ';') {
+          p++;
+        } else if ((uint8_t)p[0] == 0xEF && (uint8_t)p[1] == 0xBC && (uint8_t)p[2] == 0x8C) {
+          p += 3;
         } else {
-          char response[64];
-          snprintf(response, sizeof(response), "Mark full or invalid (max %u points)", (unsigned)kMarkMaxPoints);
-          sendLocalChannelSystemMessage(channel_idx, response);
+          p = NULL;
         }
-        return true;
+        if (p) {
+          while (*p == ' ' || *p == '	') p++;
+          lon = strtod(p, &end);
+          if (end != p) {
+            if (addMarkPoint(lat, lon)) {
+              char response[96];
+              snprintf(response, sizeof(response), "Mark point %u added: %.4f, %.4f (total %u)",
+                       (unsigned)_mark_point_count, lat, lon, (unsigned)_mark_point_count);
+              sendLocalChannelSystemMessage(channel_idx, response);
+            } else {
+              char response[64];
+              snprintf(response, sizeof(response), "Mark full or invalid (max %u points)", (unsigned)kMarkMaxPoints);
+              sendLocalChannelSystemMessage(channel_idx, response);
+            }
+            return true;
+          }
+        }
       }
     }
     sendLocalChannelSystemMessage(channel_idx, "Usage: /mark <lat,lon> | on | off | clear");
@@ -2715,6 +2754,7 @@ bool MyMesh::addMarkPoint(double lat, double lon) {
   _mark_lats[_mark_point_count] = lat;
   _mark_lons[_mark_point_count] = lon;
   _mark_point_count++;
+  saveMarkPrefs();
   return true;
 }
 
@@ -2724,6 +2764,7 @@ void MyMesh::clearMarkPoints() {
   _mark_next_check_ms = 0;
   memset(_mark_lats, 0, sizeof(_mark_lats));
   memset(_mark_lons, 0, sizeof(_mark_lons));
+  saveMarkPrefs();
 }
 
 void MyMesh::setMarkEnabled(bool on) {
@@ -2776,6 +2817,11 @@ void MyMesh::nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_
 void MyMesh::buildMarkMap(double lat, double lon, char* out, size_t out_size) const {
   if (_mark_point_count < 3) {
     snprintf(out, out_size, "Geofence: need at least 3 points (have %u)", (unsigned)_mark_point_count);
+    return;
+  }
+  // No GPS fix yet
+  if (lat == 0.0 && lon == 0.0) {
+    snprintf(out, out_size, "Geofence %u pts | GPS: no fix", (unsigned)_mark_point_count);
     return;
   }
   // Build a simple 7x7 character grid centred on the device position.
@@ -2865,6 +2911,44 @@ void MyMesh::buildMarkMap(double lat, double lon, char* out, size_t out_size) co
   snprintf(out, out_size, "%s", buf);
 }
 
+void MyMesh::getMarkPoint(uint8_t idx, double& lat, double& lon) const {
+  if (idx < _mark_point_count) {
+    lat = _mark_lats[idx];
+    lon = _mark_lons[idx];
+  } else {
+    lat = 0; lon = 0;
+  }
+}
+
+void MyMesh::saveMarkPrefs() {
+  uint8_t buf[1 + kMarkMaxPoints * 16];
+  uint8_t* p = buf;
+  *p++ = _mark_point_count;
+  for (uint8_t i = 0; i < _mark_point_count && i < kMarkMaxPoints; i++) {
+    memcpy(p, &_mark_lats[i], 8); p += 8;
+    memcpy(p, &_mark_lons[i], 8); p += 8;
+  }
+  _store->saveGeofence(buf, p - buf);
+}
+
+bool MyMesh::loadMarkPrefs() {
+  uint8_t buf[1 + kMarkMaxPoints * 16];
+  uint8_t n = 0;
+  if (!_store->loadGeofence(buf, sizeof(buf), n)) return false;
+  if (n < 1) return false;
+  uint8_t count = buf[0];
+  if (count > kMarkMaxPoints) count = kMarkMaxPoints;
+  _mark_point_count = 0;
+  uint8_t* p = buf + 1;
+  for (uint8_t i = 0; i < count; i++) {
+    if (p - buf + 16 > n) break;
+    memcpy(&_mark_lats[i], p, 8); p += 8;
+    memcpy(&_mark_lons[i], p, 8); p += 8;
+    _mark_point_count++;
+  }
+  return _mark_point_count > 0;
+}
+
 void MyMesh::checkMark() {
   if (!_mark_enabled || _mark_point_count < 3) return;
   if (_mark_next_check_ms == 0 || !millisHasNowPassed(_mark_next_check_ms)) return;
@@ -2879,16 +2963,20 @@ void MyMesh::checkMark() {
 
   bool inside = isPointInsideMark(lat, lon);
   if (inside) {
-    _mark_outside = false;
+    // Just returned to fence: send one notification
+    if (_mark_outside) {
+      _mark_outside = false;
+      sendMarkInsideAlert();
+    }
     _mark_next_check_ms = millis() + kMarkCheckIntervalMs;
     return;
   }
 
-  // Outside fence: send alert (but only if we transitioned from inside or first time)
+  // Outside fence: send alert every check interval
   if (!_mark_outside) {
-    _mark_outside = true;
-    sendMarkAlert();
+    _mark_outside = true;  // first time outside
   }
+  sendMarkAlert();
   _mark_next_check_ms = millis() + kMarkCheckIntervalMs;
 }
 
@@ -2896,44 +2984,71 @@ void MyMesh::sendMarkAlert() {
   double lat = sensors.node_lat;
   double lon = sensors.node_lon;
 
+  // Build alert message
+  char msg[512];
+  int pos = 0;
+  pos += snprintf(msg + pos, sizeof(msg) - pos, "[Geofence] OUTSIDE (%.4f, %.4f)", lat, lon);
+
   // Find two nearest fence points
   uint8_t near0, near1;
   nearestMarkPoints(lat, lon, near0, near1);
-
-  // Build a small ASCII map for the alert
-  char map_buf[384];
-  buildMarkMap(lat, lon, map_buf, sizeof(map_buf));
-
-  // Send via the first channel that has /mark enabled
-  // We'll store the last channel index for this purpose, but for now
-  // send to whichever context triggered it (during checkMark we don't have channel context).
-  // We'll broadcast to channel 0 (Public) by convention.
-  sendLocalChannelSystemMessage(0, map_buf);
-
-  // Also include relative bearing text
-  char rel[128];
   double dlat0 = _mark_lats[near0] - lat;
   double dlon0 = _mark_lons[near0] - lon;
   double dlat1 = _mark_lats[near1] - lat;
   double dlon1 = _mark_lons[near1] - lon;
-  snprintf(rel, sizeof(rel), "Nearest marks: #%u (%.4f,%.4f) ∆%.5f, #%u (%.4f,%.4f) ∆%.5f",
-           (unsigned)near0, _mark_lats[near0], _mark_lons[near0], dlat0 * dlat0 + dlon0 * dlon0,
-           (unsigned)near1, _mark_lats[near1], _mark_lons[near1], dlat1 * dlat1 + dlon1 * dlon1);
-  sendLocalChannelSystemMessage(0, rel);
+  pos += snprintf(msg + pos, sizeof(msg) - pos, " | near #%u (%.4f,%.4f) #%u (%.4f,%.4f)",
+                  (unsigned)near0, _mark_lats[near0], _mark_lons[near0],
+                  (unsigned)near1, _mark_lats[near1], _mark_lons[near1]);
+
+  // Send via LoRa to the target channel
+  if (_mark_channel_idx != 0xFF) {
+    uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+    ChannelDetails ch;
+    if (getChannel(_mark_channel_idx, ch)) {
+      sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
+    }
+  }
+}
+
+void MyMesh::sendMarkInsideAlert() {
+  char msg[128];
+  double lat = sensors.node_lat;
+  double lon = sensors.node_lon;
+  snprintf(msg, sizeof(msg), "[Geofence] INSIDE (%.4f, %.4f)", lat, lon);
+  if (_mark_channel_idx != 0xFF) {
+    uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+    ChannelDetails ch;
+    if (getChannel(_mark_channel_idx, ch)) {
+      sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
+    }
+  }
 }
 
 const char* MyMesh::describeMarkStatus() const {
-  static char buf[96];
+  static char buf[128];
+  const char* target_str = "ch0";
+  {
+    uint8_t ch = _mark_channel_idx;
+    if (ch == 0xFF) ch = 0;
+    snprintf(buf + 100, 28, "ch%u", (unsigned)ch);
+    target_str = buf + 100;
+  }
   if (!_mark_enabled) {
-    snprintf(buf, sizeof(buf), "disabled (%u points stored)", (unsigned)_mark_point_count);
+    snprintf(buf, sizeof(buf), "disabled (%u pts) | target: %s",
+             (unsigned)_mark_point_count,
+             _mark_channel_idx == 0xFF ? "not set" : target_str);
   } else if (_mark_point_count < 3) {
-    snprintf(buf, sizeof(buf), "enabled but need %u more points", (unsigned)(3 - _mark_point_count));
+    snprintf(buf, sizeof(buf), "enabled, need %u more pts | target: %s",
+             (unsigned)(3 - _mark_point_count),
+             _mark_channel_idx == 0xFF ? "not set" : target_str);
   } else {
     double lat = sensors.node_lat;
     double lon = sensors.node_lon;
     bool inside = isPointInsideMark(lat, lon);
-    snprintf(buf, sizeof(buf), "%s (%u pts) dev=%s", _mark_outside ? "ALERT" : "OK",
-             (unsigned)_mark_point_count, inside ? "INSIDE" : "OUTSIDE");
+    snprintf(buf, sizeof(buf), "%s (%u pts) dev=%s | target: %s",
+             _mark_outside ? "ALERT" : "OK",
+             (unsigned)_mark_point_count, inside ? "INSIDE" : "OUTSIDE",
+             _mark_channel_idx == 0xFF ? "ch0 (default)" : target_str);
   }
   return buf;
 }
@@ -2949,10 +3064,16 @@ void MyMesh::sendLobatMessage() {
   uint16_t mv = board.getBattMilliVolts();
   // Rough percent: 3.0V = 0%, 4.2V = 100% (typical LiPo)
   uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
-  char msg[80];
-  snprintf(msg, sizeof(msg), "[Low battery] %u%% (%u mV) -- auto alert %u/%u",
-           pct, mv, (unsigned)_lobat_count + 1, (unsigned)kLobatMaxCount);
-  sendLocalChannelSystemMessage(_lobat_channel_idx, msg);
+  unsigned long uptime_h = millis() / 3600000UL;
+  char msg[160];
+  snprintf(msg, sizeof(msg), "Batt %u%% (%umV) | up %luh | alert %u/%u",
+           pct, mv, uptime_h, (unsigned)_lobat_count + 1, (unsigned)kLobatMaxCount);
+  // Send via LoRa to the armed channel so all nodes in that channel see it
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  ChannelDetails ch;
+  if (getChannel(_lobat_channel_idx, ch)) {
+    sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
+  }
   _lobat_count++;
   _lobat_next_check_ms = millis() + kLobatCheckIntervalMs;
 }
@@ -2965,7 +3086,7 @@ void MyMesh::checkLobat() {
   uint16_t mv = board.getBattMilliVolts();
   uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
 
-  if (pct < kLobatThresholdPct) {
+  if (pct < _lobat_threshold_pct) {
     sendLobatMessage();
   } else {
     // Battery recovered above threshold, reset timer and keep watching
@@ -2978,14 +3099,19 @@ const char* MyMesh::describeLobatStatus() const {
   static char buf[80];
   uint16_t mv = board.getBattMilliVolts();
   uint8_t pct = (mv <= 3000) ? 0 : (mv >= 4200) ? 100 : (uint8_t)((mv - 3000) * 100UL / 1200);
-  snprintf(buf, sizeof(buf), "armed on ch%u, sent %u/%u, batt %u%% (%u mV)",
+  snprintf(buf, sizeof(buf), "armed on ch%u, sent %u/%u, thresh %u%%, batt %u%% (%u mV)",
            (unsigned)_lobat_channel_idx, (unsigned)_lobat_count, (unsigned)kLobatMaxCount,
+           (unsigned)_lobat_threshold_pct,
            (unsigned)pct, (unsigned)mv);
   return buf;
 }
 
 void MyMesh::begin(bool has_display) {
   BaseChatMesh::begin();
+  _lobat_threshold_pct = kLobatDefaultThresholdPct;
+  // Restore persisted state
+  _store->loadLobatPrefs(_lobat_threshold_pct);
+  loadMarkPrefs();
 
   if (!_store->loadMainIdentity(self_id)) {
     self_id = radio_new_identity(); // create new random identity

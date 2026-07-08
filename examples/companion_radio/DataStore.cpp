@@ -809,3 +809,42 @@ bool DataStore::deleteBlobByKey(const uint8_t key[], int key_len) {
   return true; // return true even if file did not exist
 }
 #endif
+
+
+// ---- Low-battery (lobat) persistence ----
+
+bool DataStore::loadLobatPrefs(uint8_t& threshold_pct) {
+  File file = openRead(_getContactsChannelsFS(), "/lobat.bin");
+  if (!file) return false;
+  uint8_t val = 0;
+  if (file.read(&val, 1) != 1) { file.close(); return false; }
+  threshold_pct = val;
+  file.close();
+  return true;
+}
+
+bool DataStore::saveLobatPrefs(uint8_t threshold_pct) {
+  File file = openWrite(_getContactsChannelsFS(), "/lobat.bin");
+  if (!file) return false;
+  file.write(&threshold_pct, 1);
+  file.close();
+  return true;
+}
+
+// ---- Geofence (mark) persistence ----
+
+bool DataStore::saveGeofence(const uint8_t* data, uint8_t len) {
+  File file = openWrite(_getContactsChannelsFS(), "/geofence.bin");
+  if (!file) return false;
+  file.write(data, len);
+  file.close();
+  return true;
+}
+
+bool DataStore::loadGeofence(uint8_t* dest, uint8_t max_len, uint8_t& out_len) {
+  File file = openRead(_getContactsChannelsFS(), "/geofence.bin");
+  if (!file) return false;
+  out_len = file.read(dest, max_len);
+  file.close();
+  return out_len > 0;
+}

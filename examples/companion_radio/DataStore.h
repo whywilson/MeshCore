@@ -70,6 +70,10 @@ public:
   bool saveTapTarget(const TapTargetPrefs& prefs);
   bool loadBuzzerPrefs(BuzzerPrefs& prefs);
   bool saveBuzzerPrefs(const BuzzerPrefs& prefs);
+  bool loadLobatPrefs(uint8_t& threshold_pct);
+  bool saveLobatPrefs(uint8_t threshold_pct);
+  bool saveGeofence(const uint8_t* data, uint8_t len);
+  bool loadGeofence(uint8_t* dest, uint8_t max_len, uint8_t& out_len);
 #endif
   void migrateToSecondaryFS();
   uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);

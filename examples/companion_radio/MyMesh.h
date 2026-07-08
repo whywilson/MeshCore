@@ -286,10 +286,15 @@ private:
   void clearMarkPoints();
   void setMarkEnabled(bool on);
   bool isMarkEnabled() const { return _mark_enabled; }
+  uint8_t getMarkPointCount() const { return _mark_point_count; }
+  void getMarkPoint(uint8_t idx, double& lat, double& lon) const;
+  void saveMarkPrefs();
+  bool loadMarkPrefs();
   bool isPointInsideMark(double lat, double lon) const;
   const char* describeMarkStatus() const;
   void checkMark();
   void sendMarkAlert();
+  void sendMarkInsideAlert();
   // Returns the two nearest fence-point indices (closest, second-closest).
   void nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_t& out_idx1) const;
   // Build a 7x7 ASCII art map centered on the device.
@@ -340,11 +345,12 @@ private:
 #endif
   // Low-battery auto-notify state
   static constexpr uint32_t kLobatCheckIntervalMs = 180000; // 3 minutes
-  static constexpr uint32_t kLobatThresholdPct   = 80;      // below 20%
+  static constexpr uint8_t  kLobatDefaultThresholdPct = 20;  // default 20%
   static constexpr uint8_t  kLobatMaxCount       = 3;       // max 3 alerts
   uint8_t  _lobat_channel_idx;   // 0xFF = not set, otherwise the target channel
   uint8_t  _lobat_count;         // sends so far
   uint32_t _lobat_next_check_ms; // next check timestamp (millis)
+  uint8_t  _lobat_threshold_pct; // threshold percentage, default kLobatDefaultThresholdPct
 
   // Geofence (/mark) state
   static constexpr uint32_t kMarkCheckIntervalMs = 180000; // 3 minutes
@@ -354,6 +360,7 @@ private:
   double   _mark_lats[kMarkMaxPoints];
   double   _mark_lons[kMarkMaxPoints];
   uint32_t _mark_next_check_ms;
+  uint8_t  _mark_channel_idx;   // 0xFF = not set, target channel for alerts
 
   uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
   uint8_t out_frame[MAX_FRAME_SIZE + 1];
