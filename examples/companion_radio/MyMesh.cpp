@@ -1239,6 +1239,11 @@ bool MyMesh::handleLocalBuzzerCommand(uint8_t channel_idx, const char *text) {
   bool already_same = _buzzerPrefs.channel_set[channel_idx] && _buzzerPrefs.channel_mode[channel_idx] == new_mode;
   _buzzerPrefs.channel_set[channel_idx] = 1;
   _buzzerPrefs.channel_mode[channel_idx] = new_mode;
+  // If user sets a non-OFF mode per-channel, clear global override so the setting applies
+  if (new_mode > NOTIFY_MODE_OFF && _buzzerPrefs.global_override) {
+    _buzzerPrefs.global_override = 0;
+    persistBuzzerPrefs();
+  }
   persistBuzzerPrefs();
 
   char response[128];
