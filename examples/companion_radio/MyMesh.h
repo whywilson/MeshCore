@@ -285,6 +285,8 @@ private:
   bool addMarkPoint(double lat, double lon);
   void clearMarkPoints();
   void setMarkEnabled(bool on);
+  void setMarkChannel(uint8_t channel_idx);
+  void clearGeofenceFile();
   bool isMarkEnabled() const { return _mark_enabled; }
   uint8_t getMarkPointCount() const { return _mark_point_count; }
   void getMarkPoint(uint8_t idx, double& lat, double& lon) const;
@@ -360,6 +362,8 @@ private:
   double   _mark_lats[kMarkMaxPoints];
   double   _mark_lons[kMarkMaxPoints];
   uint32_t _mark_next_check_ms;
+  double   _mark_last_alert_lat;   // last position we sent an alert from
+  double   _mark_last_alert_lon;
   uint8_t  _mark_channel_idx;   // 0xFF = not set, target channel for alerts
 
   uint8_t cmd_frame[MAX_FRAME_SIZE + 1];

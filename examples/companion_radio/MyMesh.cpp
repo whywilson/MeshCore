@@ -2001,7 +2001,7 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
       return true;
     }
     if (matchesToken(args, "here")) {
-      _mark_channel_idx = channel_idx;
+      setMarkChannel(channel_idx);
       char response[96];
       snprintf(response, sizeof(response), "Geofence alerts will go to this channel (%s)",
                channel.name[0] ? channel.name : "ch" + channel_idx);
@@ -2739,12 +2739,14 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
 // ---- Geofence (/mark) ----
 
 void MyMesh::initMark() {
+  // Set defaults; loadMarkPrefs() later in begin() overwrites persisted state.
   _mark_enabled = false;
-  _mark_outside = false;
   _mark_point_count = 0;
+  _mark_channel_idx = 0xFF;
+  _mark_outside = false;
   _mark_next_check_ms = 0;
-  memset(_mark_lats, 0, sizeof(_mark_lats));
-  memset(_mark_lons, 0, sizeof(_mark_lons));
+  _mark_last_alert_lat = 0;
+  _mark_last_alert_lon = 0;
 }
 
 bool MyMesh::addMarkPoint(double lat, double lon) {
@@ -2782,6 +2784,15 @@ void MyMesh::setMarkEnabled(bool on) {
   }
 }
 
+void MyMesh::setMarkChannel(uint8_t channel_idx) {
+  _mark_channel_idx = channel_idx;
+  saveMarkPrefs();
+}
+
+void MyMesh::clearGeofenceFile() {
+  _store->saveGeofence((const uint8_t*)"", 0);
+}
+
 // Ray-casting algorithm: is point inside polygon?
 bool MyMesh::isPointInsideMark(double lat, double lon) const {
   if (_mark_point_count < 3) return false; // need a polygon
@@ -2816,16 +2827,14 @@ void MyMesh::nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_
 
 void MyMesh::buildMarkMap(double lat, double lon, char* out, size_t out_size) const {
   if (_mark_point_count < 3) {
-    snprintf(out, out_size, "Geofence: need at least 3 points (have %u)", (unsigned)_mark_point_count);
+    snprintf(out, out_size, "Geofence: need >= 3 pts (%u)", (unsigned)_mark_point_count);
     return;
   }
-  // No GPS fix yet
-  if (lat == 0.0 && lon == 0.0) {
+  if ((lat > -0.001 && lat < 0.001) && (lon > -0.001 && lon < 0.001)) {
     snprintf(out, out_size, "Geofence %u pts | GPS: no fix", (unsigned)_mark_point_count);
     return;
   }
-  // Build a simple 7x7 character grid centred on the device position.
-  // Each cell spans roughly (span_lat/GRID) degrees in each direction.
+
   double min_lat = 90, max_lat = -90, min_lon = 180, max_lon = -180;
   for (uint8_t i = 0; i < _mark_point_count; i++) {
     if (_mark_lats[i] < min_lat) min_lat = _mark_lats[i];
@@ -2833,81 +2842,61 @@ void MyMesh::buildMarkMap(double lat, double lon, char* out, size_t out_size) co
     if (_mark_lons[i] < min_lon) min_lon = _mark_lons[i];
     if (_mark_lons[i] > max_lon) max_lon = _mark_lons[i];
   }
-  // Add device position to bounds so it's always visible
   if (lat < min_lat) min_lat = lat;
   if (lat > max_lat) max_lat = lat;
   if (lon < min_lon) min_lon = lon;
   if (lon > max_lon) max_lon = lon;
 
-  // Expand a bit for padding
-  double pad_lat = (max_lat - min_lat) * 0.15;
-  double pad_lon = (max_lon - min_lon) * 0.15;
-  if (pad_lat < 0.0001) pad_lat = 0.0001;
-  if (pad_lon < 0.0001) pad_lon = 0.0001;
-  min_lat -= pad_lat; max_lat += pad_lat;
+  // Tight padding
+  double pad = (max_lat - min_lat) * 0.12;
+  double pad_lon = (max_lon - min_lon) * 0.12;
+  if (pad < 0.00005) pad = 0.00005;
+  if (pad_lon < 0.00005) pad_lon = 0.00005;
+  min_lat -= pad; max_lat += pad;
   min_lon -= pad_lon; max_lon += pad_lon;
 
-  const int GRID = 7;
-  double step_lat = (max_lat - min_lat) / (GRID - 1);
-  double step_lon = (max_lon - min_lon) / (GRID - 1);
-  if (step_lat == 0) step_lat = 1e-6;
-  if (step_lon == 0) step_lon = 1e-6;
+  const int G = 5;  // compact 5x5
+  double step_lat = (max_lat - min_lat) / (G - 1);
+  double step_lon = (max_lon - min_lon) / (G - 1);
+  if (step_lat < 1e-10) step_lat = 1e-6;
+  if (step_lon < 1e-10) step_lon = 1e-6;
 
-  char buf[256];
+  char buf[192];
   int pos = 0;
-  pos += snprintf(buf + pos, sizeof(buf) - pos, "Geofence %u pts:\n", (unsigned)_mark_point_count);
-
-  // For each fence segment, mark which grid cells it passes through
-  // We'll just mark the vertices on the grid
-  bool vertex_cell[GRID][GRID];
-  bool inside_cell[GRID][GRID];
-  memset(vertex_cell, 0, sizeof(vertex_cell));
-  memset(inside_cell, 0, sizeof(inside_cell));
-
-  // Mark vertices
-  for (uint8_t vi = 0; vi < _mark_point_count; vi++) {
-    int gx = (int)round((_mark_lons[vi] - min_lon) / step_lon);
-    int gy = (int)round((_mark_lats[vi] - min_lat) / step_lat);
-    if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID) {
-      vertex_cell[gy][gx] = true;
-    }
-  }
-
-  // Mark each grid cell as inside/outside polygon
-  for (int y = 0; y < GRID; y++) {
-    double cell_lat = min_lat + y * step_lat;
-    for (int x = 0; x < GRID; x++) {
-      double cell_lon = min_lon + x * step_lon;
-      inside_cell[y][x] = isPointInsideMark(cell_lat, cell_lon);
-    }
-  }
-
-  // Device position grid cell
+  bool dev_inside = isPointInsideMark(lat, lon);
   int dx = (int)round((lon - min_lon) / step_lon);
   int dy = (int)round((lat - min_lat) / step_lat);
-  bool dev_inside = isPointInsideMark(lat, lon);
 
-  // Draw grid (top row first = max lat)
-  for (int y = GRID - 1; y >= 0; y--) {
-    for (int x = 0; x < GRID; x++) {
+  // Vertex cells
+  bool vt[G][G]; memset(vt, 0, sizeof(vt));
+  for (uint8_t i = 0; i < _mark_point_count; i++) {
+    int gx = (int)round((_mark_lons[i] - min_lon) / step_lon);
+    int gy = (int)round((_mark_lats[i] - min_lat) / step_lat);
+    if (gx >= 0 && gx < G && gy >= 0 && gy < G) vt[gy][gx] = true;
+  }
+
+  // Inside cells
+  bool in[G][G];
+  for (int y = 0; y < G; y++) {
+    double clat = min_lat + y * step_lat;
+    for (int x = 0; x < G; x++) {
+      in[y][x] = isPointInsideMark(clat, min_lon + x * step_lon);
+    }
+  }
+
+  for (int y = G - 1; y >= 0; y--) {
+    for (int x = 0; x < G; x++) {
       if (x == dx && y == dy) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", dev_inside ? "★" : "☆");
-      } else if (vertex_cell[y][x]) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "■");
-      } else if (inside_cell[y][x]) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos, ".");
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "*");
+      } else if (vt[y][x]) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "X");
       } else {
-        pos += snprintf(buf + pos, sizeof(buf) - pos, " ");
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%c", in[y][x] ? '.' : ' ');
       }
     }
-    if (y == GRID - 1) pos += snprintf(buf + pos, sizeof(buf) - pos, " N");
-    if (y == dy)      pos += snprintf(buf + pos, sizeof(buf) - pos, " ←%.4fN", lat);
     pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
   }
-  // Longitude labels
-  pos += snprintf(buf + pos, sizeof(buf) - pos, "W← %.4fE →\n", lon);
-  pos += snprintf(buf + pos, sizeof(buf) - pos, "Dev: %s (%.4f, %.4f)", dev_inside ? "INSIDE" : "OUTSIDE", lat, lon);
-
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", dev_inside ? "IN" : "OUT");
   snprintf(out, out_size, "%s", buf);
 }
 
@@ -2921,10 +2910,16 @@ void MyMesh::getMarkPoint(uint8_t idx, double& lat, double& lon) const {
 }
 
 void MyMesh::saveMarkPrefs() {
-  uint8_t buf[1 + kMarkMaxPoints * 16];
+  // Layout: [flags][channel_idx][count][lat0][lon0]...
+  //   flags bit 0 = enabled
+  uint8_t buf[1 + 1 + 1 + kMarkMaxPoints * 16];
   uint8_t* p = buf;
-  *p++ = _mark_point_count;
-  for (uint8_t i = 0; i < _mark_point_count && i < kMarkMaxPoints; i++) {
+  *p++ = _mark_enabled ? 0x01 : 0;
+  *p++ = _mark_channel_idx;
+  uint8_t count = _mark_point_count;
+  if (count > kMarkMaxPoints) count = kMarkMaxPoints;
+  *p++ = count;
+  for (uint8_t i = 0; i < count; i++) {
     memcpy(p, &_mark_lats[i], 8); p += 8;
     memcpy(p, &_mark_lons[i], 8); p += 8;
   }
@@ -2932,16 +2927,20 @@ void MyMesh::saveMarkPrefs() {
 }
 
 bool MyMesh::loadMarkPrefs() {
-  uint8_t buf[1 + kMarkMaxPoints * 16];
+  uint8_t buf[1 + 1 + 1 + kMarkMaxPoints * 16];
   uint8_t n = 0;
   if (!_store->loadGeofence(buf, sizeof(buf), n)) return false;
-  if (n < 1) return false;
-  uint8_t count = buf[0];
+  if (n < 3) return false;
+  uint8_t* p = buf;
+  _mark_enabled = (*p++ & 0x01) != 0;
+  _mark_channel_idx = *p++;
+  uint8_t count = *p++;
   if (count > kMarkMaxPoints) count = kMarkMaxPoints;
+  uint8_t expected = 3 + count * 16;
+  if (n < expected) count = (n - 3) / 16;
   _mark_point_count = 0;
-  uint8_t* p = buf + 1;
   for (uint8_t i = 0; i < count; i++) {
-    if (p - buf + 16 > n) break;
+    if ((size_t)(p - buf + 16) > n) break;
     memcpy(&_mark_lats[i], p, 8); p += 8;
     memcpy(&_mark_lons[i], p, 8); p += 8;
     _mark_point_count++;
@@ -2949,21 +2948,27 @@ bool MyMesh::loadMarkPrefs() {
   return _mark_point_count > 0;
 }
 
+
+static double approxMeters(double dlat, double dlon, double ref_lat_rad) {
+  double dy = dlat * 111320.0;
+  double dx = dlon * 111320.0 * cos(ref_lat_rad);
+  return sqrt(dx * dx + dy * dy);
+}
 void MyMesh::checkMark() {
+
   if (!_mark_enabled || _mark_point_count < 3) return;
   if (_mark_next_check_ms == 0 || !millisHasNowPassed(_mark_next_check_ms)) return;
 
   double lat = sensors.node_lat;
   double lon = sensors.node_lon;
-  if (lat == 0.0 && lon == 0.0) {
-    // No GPS fix yet, try again later
+  // Reject invalid GPS: both lat and lon near zero means no fix
+  if ((lat > -0.001 && lat < 0.001) && (lon > -0.001 && lon < 0.001)) {
     _mark_next_check_ms = millis() + 30000;
     return;
   }
 
   bool inside = isPointInsideMark(lat, lon);
   if (inside) {
-    // Just returned to fence: send one notification
     if (_mark_outside) {
       _mark_outside = false;
       sendMarkInsideAlert();
@@ -2972,55 +2977,67 @@ void MyMesh::checkMark() {
     return;
   }
 
-  // Outside fence: send alert every check interval
-  if (!_mark_outside) {
-    _mark_outside = true;  // first time outside
+  // Outside fence: only send if position has changed significantly (> ~10m)
+  double lat_rad = lat * (M_PI / 180.0);
+  double move = approxMeters(lat - _mark_last_alert_lat, lon - _mark_last_alert_lon, lat_rad);
+  if (move > 10.0 || !_mark_outside) {
+    _mark_outside = true;
+    _mark_last_alert_lat = lat;
+    _mark_last_alert_lon = lon;
+    sendMarkAlert();
   }
-  sendMarkAlert();
   _mark_next_check_ms = millis() + kMarkCheckIntervalMs;
 }
+
 
 void MyMesh::sendMarkAlert() {
   double lat = sensors.node_lat;
   double lon = sensors.node_lon;
-
-  // Build alert message
-  char msg[512];
-  int pos = 0;
-  pos += snprintf(msg + pos, sizeof(msg) - pos, "[Geofence] OUTSIDE (%.4f, %.4f)", lat, lon);
+  double lat_rad = lat * (M_PI / 180.0);
 
   // Find two nearest fence points
   uint8_t near0, near1;
   nearestMarkPoints(lat, lon, near0, near1);
-  double dlat0 = _mark_lats[near0] - lat;
-  double dlon0 = _mark_lons[near0] - lon;
-  double dlat1 = _mark_lats[near1] - lat;
-  double dlon1 = _mark_lons[near1] - lon;
-  pos += snprintf(msg + pos, sizeof(msg) - pos, " | near #%u (%.4f,%.4f) #%u (%.4f,%.4f)",
-                  (unsigned)near0, _mark_lats[near0], _mark_lons[near0],
-                  (unsigned)near1, _mark_lats[near1], _mark_lons[near1]);
+  double d0 = approxMeters(_mark_lats[near0] - lat, _mark_lons[near0] - lon, lat_rad);
+  double d1 = approxMeters(_mark_lats[near1] - lat, _mark_lons[near1] - lon, lat_rad);
 
-  // Send via LoRa to the target channel
+  // Build alert message
+  char msg[128];
+  char dir[4] = "";
+  double dlat = _mark_lats[near0] - lat;
+  double dlon = _mark_lons[near0] - lon;
+  if (fabs(dlat) > 1e-8 || fabs(dlon) > 1e-8) {
+    if (fabs(dlat) > fabs(dlon) * 1.5) {
+      snprintf(dir, sizeof(dir), " %c", (dlat >= 0) ? 'N' : 'S');
+    } else if (fabs(dlon) > fabs(dlat) * 1.5) {
+      snprintf(dir, sizeof(dir), " %c", (dlon >= 0) ? 'E' : 'W');
+    } else {
+      snprintf(dir, sizeof(dir), " %c%c", (dlat >= 0) ? 'N' : 'S', (dlon >= 0) ? 'E' : 'W');
+    }
+  }
+  snprintf(msg, sizeof(msg), "[Geofence] OUTSIDE %s%.0fm", dir, d0);
+
+  // Send via LoRa to target channel, also log locally so the app sees it
   if (_mark_channel_idx != 0xFF) {
     uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
     ChannelDetails ch;
     if (getChannel(_mark_channel_idx, ch)) {
       sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
     }
+    logLocalChannelMessage(_mark_channel_idx, msg);
   }
 }
 
 void MyMesh::sendMarkInsideAlert() {
   char msg[128];
-  double lat = sensors.node_lat;
-  double lon = sensors.node_lon;
-  snprintf(msg, sizeof(msg), "[Geofence] INSIDE (%.4f, %.4f)", lat, lon);
+  snprintf(msg, sizeof(msg), "[Geofence] INSIDE");
   if (_mark_channel_idx != 0xFF) {
     uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
     ChannelDetails ch;
     if (getChannel(_mark_channel_idx, ch)) {
       sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
     }
+    logLocalChannelMessage(_mark_channel_idx, msg);
   }
 }
 
@@ -3109,9 +3126,7 @@ const char* MyMesh::describeLobatStatus() const {
 void MyMesh::begin(bool has_display) {
   BaseChatMesh::begin();
   _lobat_threshold_pct = kLobatDefaultThresholdPct;
-  // Restore persisted state
-  _store->loadLobatPrefs(_lobat_threshold_pct);
-  loadMarkPrefs();
+  // Restore persisted state (loadLobatPrefs + loadMarkPrefs moved below after initMark/initLobat)
 
   if (!_store->loadMainIdentity(self_id)) {
     self_id = radio_new_identity(); // create new random identity
@@ -3197,6 +3212,9 @@ void MyMesh::begin(bool has_display) {
 
   initLobat();
   initMark();
+  // Load persisted data (AFTER initMark/initLobat so they override defaults)
+  _store->loadLobatPrefs(_lobat_threshold_pct);
+  loadMarkPrefs();
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
