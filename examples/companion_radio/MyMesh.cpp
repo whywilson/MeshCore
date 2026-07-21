@@ -2031,46 +2031,54 @@ bool MyMesh::handleLocalChannelCommand(uint8_t channel_idx, const char *text, co
       sendLocalChannelSystemMessage(channel_idx, "Geofence points cleared");
       return true;
     }
-    // Try to parse as a coordinate pair "lat,lon" or "lat, lon"
+    // Try to parse one or more coordinate pairs "lat,lon lat,lon ..."
     {
-      double lat, lon;
-      // Flexible parse: skip whitespace, allow ASCII or fullwidth comma
       const char *p = args;
       while (*p == ' ' || *p == '	') p++;
       char *end = NULL;
-      lat = strtod(p, &end);
-      if (end != p && *end != 0) {
-        p = end;
+      uint8_t added = 0;
+      bool had_error = false;
+      while (*p) {
+        // Skip whitespace
         while (*p == ' ' || *p == '	') p++;
-        // Accept ASCII comma, Chinese comma (0xEF 0xBC 0x8C), or semicolon
+        if (!*p) break;
+        // Parse latitude
+        double lat = strtod(p, &end);
+        if (end == p) break;
+        p = end;
+        // Skip whitespace before separator
+        while (*p == ' ' || *p == '	') p++;
+        // Accept ASCII comma, Chinese comma, or semicolon
         if (*p == ',' || *p == ';') {
           p++;
         } else if ((uint8_t)p[0] == 0xEF && (uint8_t)p[1] == 0xBC && (uint8_t)p[2] == 0x8C) {
           p += 3;
         } else {
-          p = NULL;
+          break;
         }
-        if (p) {
-          while (*p == ' ' || *p == '	') p++;
-          lon = strtod(p, &end);
-          if (end != p) {
-            if (addMarkPoint(lat, lon)) {
-              char response[96];
-              snprintf(response, sizeof(response), "Mark point %u added: %.4f, %.4f (total %u)",
-                       (unsigned)_mark_point_count, lat, lon, (unsigned)_mark_point_count);
-              sendLocalChannelSystemMessage(channel_idx, response);
-            } else {
-              char response[64];
-              snprintf(response, sizeof(response), "Mark full or invalid (max %u points)", (unsigned)kMarkMaxPoints);
-              sendLocalChannelSystemMessage(channel_idx, response);
-            }
-            return true;
-          }
+        // Skip whitespace after separator
+        while (*p == ' ' || *p == '	') p++;
+        // Parse longitude
+        double lon = strtod(p, &end);
+        if (end == p) break;
+        p = end;
+        if (addMarkPoint(lat, lon)) {
+          added++;
+        } else {
+          had_error = true;
+          break;
         }
       }
+      if (added > 0) {
+        char response[96];
+        snprintf(response, sizeof(response), "Mark: added %u point(s) (total %u)",
+                 (unsigned)added, (unsigned)_mark_point_count);
+        sendLocalChannelSystemMessage(channel_idx, response);
+      } else if (!had_error) {
+        sendLocalChannelSystemMessage(channel_idx, "Usage: /mark <lat,lon> ... | on | off | clear");
+      }
+      return true;
     }
-    sendLocalChannelSystemMessage(channel_idx, "Usage: /mark <lat,lon> | on | off | clear");
-    return true;
   }
   // /help: list supported commands
   if (strncmp(cmd, "/help", 5) == 0) {
@@ -3027,7 +3035,9 @@ void MyMesh::sendMarkAlert() {
     uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
     ChannelDetails ch;
     if (getChannel(_mark_channel_idx, ch)) {
-      sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
+      if (sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg))) {
+        sendMarkLocationAdvert();
+      }
     }
     logLocalChannelMessage(_mark_channel_idx, msg);
   }
@@ -3040,10 +3050,19 @@ void MyMesh::sendMarkInsideAlert() {
     uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
     ChannelDetails ch;
     if (getChannel(_mark_channel_idx, ch)) {
-      sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg));
+      if (sendGroupMessage(timestamp, ch.channel, _prefs.node_name, msg, strlen(msg))) {
+        sendMarkLocationAdvert();
+      }
     }
     logLocalChannelMessage(_mark_channel_idx, msg);
   }
+}
+
+void MyMesh::sendMarkLocationAdvert() {
+  // Geofence alerts always advertise the position that triggered them, even if
+  // the normal advert location policy is configured not to share coordinates.
+  mesh::Packet *pkt = createSelfAdvert(_prefs.node_name, sensors.node_lat, sensors.node_lon);
+  if (pkt) sendZeroHop(pkt);
 }
 
 const char* MyMesh::describeMarkStatus() const {

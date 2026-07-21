@@ -297,6 +297,7 @@ private:
   void checkMark();
   void sendMarkAlert();
   void sendMarkInsideAlert();
+  void sendMarkLocationAdvert();
   // Returns the two nearest fence-point indices (closest, second-closest).
   void nearestMarkPoints(double lat, double lon, uint8_t& out_idx0, uint8_t& out_idx1) const;
   // Build a 7x7 ASCII art map centered on the device.
